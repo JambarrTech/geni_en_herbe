@@ -1,1 +1,13 @@
 @import "tailwindcss";
+
+/*
+ * `shared/` doit être declaré explicitement comme source.
+ *
+ * Sans cette directive, le scan automatique de Tailwind s'arrête à `apps/live/`
+ * et n'atteint pas le dossier partagé. Consequence mesuree : aucune classe
+ * Tailwind ecrite dans shared/ ne produit de CSS. Sont donc concernés :
+ *   - shared/components/AeerksLogo.tsx   (logo utilise par l'ecran public)
+ * Le chemin est relatif au fichier CSS : apps/live/src/ -> racine du dépôt,
+ * donc trois niveaux à remonter.
+ */
+@source "../../../shared";

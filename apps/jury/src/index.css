@@ -1,1 +1,15 @@
 @import "tailwindcss";
+
+/*
+ * `shared/` doit être declaré explicitement comme source.
+ *
+ * Sans cette directive, le scan automatique de Tailwind s'arrete a `apps/<app>/`
+ * et n'atteint pas le dossier partage. Consequence mesuree : aucune classe
+ * Tailwind ecrite dans shared/ ne produit de CSS. Sont donc Concernés :
+ *   - shared/pages/LoginPage.tsx        (page de connexion, sur /jury et /admin)
+ *   - shared/components/StaffNavbar.tsx (barre de navigation)
+ *   - shared/components/Modal.tsx        (toutes les boites de dialogue)
+ * Le chemin est relatif au fichier CSS : apps/<app>/src/ -> racine du depot,
+ * donc trois niveaux a remonter.
+ */
+@source "../../../shared";
