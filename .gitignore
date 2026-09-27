@@ -1,0 +1,25 @@
+# Dépendances
+node_modules/
+
+# Secrets — ne jamais versionner
+.env
+.env.local
+.env.*.local
+backend/.env
+
+# Builds
+dist/
+*.tsbuildinfo
+
+# Artefacts générés par la base
+backend/drizzle/meta/_journal.json.tmp
+
+# Logs
+*.log
+npm-debug.log*
+
+# Éditeurs / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

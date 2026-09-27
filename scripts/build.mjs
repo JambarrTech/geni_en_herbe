@@ -1,0 +1,70 @@
+import { spawn } from 'node:child_process';
+import { platform } from 'node:process';
+import { rm, readdir } from 'node:fs/promises';
+import path from 'node:path';
+
+const apps = ['live', 'jury', 'admin'];
+
+// Sur Windows, `npm` est un fichier `npm.cmd` : `spawn('npm')` échoue avec
+// ENOENT. C'était la cause du build/typecheck cassés sur la machine de dev
+// alors que `dev.mjs` gérait déjà ce cas correctement.
+const NPM_CMD = platform === 'win32' ? 'npm.cmd' : 'npm';
+const SHELL = platform === 'win32';
+
+// `VITE_BASE_PATH=/jury/ vite build` est une syntaxe POSIX : invalide en
+// cmd.exe. On passe la variable via `env` de spawn, ce qui fonctionne partout.
+const BASE_PATHS = {
+  live: '/',
+  jury: '/jury/',
+  admin: '/admin/',
+};
+
+function build(app) {
+  const cwd = path.resolve('apps', app);
+  return new Promise((resolve, reject) => {
+    console.log(`[build] apps/${app}...`);
+    const child = spawn(NPM_CMD, ['run', 'build'], {
+      cwd,
+      stdio: 'inherit',
+      shell: SHELL,
+      env: { ...process.env, VITE_BASE_PATH: BASE_PATHS[app] },
+    });
+    child.on('error', reject);
+    child.on('exit', (code) => {
+      if (code === 0) {
+        console.log(`[build] apps/${app} : OK`);
+        resolve();
+      } else {
+        reject(new Error(`Build de apps/${app} échoué (code ${code})`));
+      }
+    });
+  });
+}
+
+async function cleanDist() {
+  for (const app of apps) {
+    const dist = path.resolve('apps', app, 'dist');
+    await rm(dist, { recursive: true, force: true });
+  }
+  console.log('[build] dist/ nettoyé (évite les chunks périmés d\'un build précédent)');
+}
+
+async function reportSizes() {
+  for (const app of apps) {
+    const dist = path.resolve('apps', app, 'dist', 'assets');
+    let files = [];
+    try {
+      files = await readdir(dist);
+    } catch {
+      continue;
+    }
+    console.log(`[build] apps/${app}/dist/assets : ${files.length} fichier(s)`);
+  }
+}
+
+await cleanDist();
+// Les trois apps sont indépendantes : on les compile en parallèle.
+await Promise.all(apps.map(build));
+await reportSizes();
+
+console.log('\n[build] Toutes les apps sont compilées dans apps/*/dist (servies par le backend).');
