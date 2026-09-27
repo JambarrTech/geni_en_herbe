@@ -7,8 +7,14 @@ import { requireAuth, requireAdmin, revokeAllSessionsForUser, type AuthRequest }
 import { logAudit } from '../server/matchEngine.ts';
 import { hashPassword } from '../lib/password.ts';
 import { adminWriteLimit } from '../middleware/rateLimit.ts';
+import { validateIds } from '../lib/validate.ts';
 
 export const usersRouter = Router();
+
+// Valide :id et :memberId une seule fois pour toutes les routes de ce
+// routeur : 400 explicite sur un identifiant malforme, au lieu d'un NaN
+// qui partait en requete SQL et revenait en 404 trompeur ou en 500.
+validateIds(usersRouter);
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -75,7 +81,10 @@ usersRouter.post('/', requireAuth, requireAdmin, adminWriteLimit, async (req: Au
         name: name.trim(),
         email: normalizedEmail,
         role: role || 'JURY',
-        passwordHash: hashPassword(password),
+        // `await` : le hachage est asynchrone, hors event loop. La validation du
+        // mot de passe a déjà eu lieu plus haut — on ne hache que si elle est
+        // valide, pour ne pas gaspiller de CPU sur une requête malformée.
+        passwordHash: await hashPassword(password),
         active: true,
       })
       .returning();
@@ -179,7 +188,7 @@ usersRouter.post('/:id/password', requireAuth, requireAdmin, adminWriteLimit, as
 
     const [updated] = await db
       .update(users)
-      .set({ passwordHash: hashPassword(password), updatedAt: new Date() })
+      .set({ passwordHash: await hashPassword(password), updatedAt: new Date() })
       .where(eq(users.id, id))
       .returning();
 
@@ -234,3 +243,4 @@ usersRouter.delete('/:id', requireAuth, requireAdmin, adminWriteLimit, async (re
     res.status(500).json({ error: 'Erreur lors de la suppression du compte' });
   }
 });
+

@@ -38,27 +38,35 @@ test('publicQuestion tolère null/undefined', () => {
   assert.equal(publicQuestion(undefined), null);
 });
 
-test('verifyPassword accepte le bon mot de passe et rejette les autres', () => {
-  const stored = hashPassword('motdepasse-solide');
-  assert.equal(verifyPassword('motdepasse-solide', stored), true);
-  assert.equal(verifyPassword('motdepasse-solidE', stored), false, 'sensible à la casse');
-  assert.equal(verifyPassword('', stored), false);
+// `hashPassword` et `verifyPassword` sont désormais ASYNCHRONES : scrypt
+// s'exécute dans le pool de threads de libuv au lieu d'occuper l'event loop.
+// Sans `await`, `stored` serait une Promise, et `stored.includes` leverait
+// TypeError.
+test('verifyPassword accepte le bon mot de passe et rejette les autres', async () => {
+  const stored = await hashPassword('motdepasse-solide');
+  assert.equal(await verifyPassword('motdepasse-solide', stored), true);
+  assert.equal(
+    await verifyPassword('motdepasse-solidE', stored),
+    false,
+    'sensible à la casse'
+  );
+  assert.equal(await verifyPassword('', stored), false);
 });
 
-test('hashPassword produit un sel distinct à chaque appel', () => {
-  const a = hashPassword('meme-mot-de-passe');
-  const b = hashPassword('meme-mot-de-passe');
+test('hashPassword produit un sel distinct à chaque appel', async () => {
+  const a = await hashPassword('meme-mot-de-passe');
+  const b = await hashPassword('meme-mot-de-passe');
   assert.notEqual(a, b, 'deux hachages du même secret doivent différer (sel aléatoire)');
-  assert.equal(verifyPassword('meme-mot-de-passe', a), true);
-  assert.equal(verifyPassword('meme-mot-de-passe', b), true);
+  assert.equal(await verifyPassword('meme-mot-de-passe', a), true);
+  assert.equal(await verifyPassword('meme-mot-de-passe', b), true);
 });
 
-test('verifyPassword rejette une chaîne de stockage corrompue', () => {
-  assert.equal(verifyPassword('x', null), false);
-  assert.equal(verifyPassword('x', undefined), false);
-  assert.equal(verifyPassword('x', ''), false);
-  assert.equal(verifyPassword('x', 'pas-de-separateur'), false);
-  assert.equal(verifyPassword('x', ':'), false);
+test('verifyPassword rejette une chaîne de stockage corrompue', async () => {
+  assert.equal(await verifyPassword('x', null), false);
+  assert.equal(await verifyPassword('x', undefined), false);
+  assert.equal(await verifyPassword('x', ''), false);
+  assert.equal(await verifyPassword('x', 'pas-de-separateur'), false);
+  assert.equal(await verifyPassword('x', ':'), false);
 });
 
 test('les constantes métier restent cohérentes', () => {

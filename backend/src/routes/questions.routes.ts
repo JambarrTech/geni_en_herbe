@@ -6,8 +6,14 @@ import { requireAuth, requireAdmin, type AuthRequest } from '../middleware/auth.
 import { logAudit } from '../server/matchEngine.ts';
 import { CONFIG, FLOW } from '../config.ts';
 import { adminWriteLimit } from '../middleware/rateLimit.ts';
+import { validateIds } from '../lib/validate.ts';
 
 export const questionsRouter = Router();
+
+// Valide :id et :memberId une seule fois pour toutes les routes de ce
+// routeur : 400 explicite sur un identifiant malforme, au lieu d'un NaN
+// qui partait en requete SQL et revenait en 404 trompeur ou en 500.
+validateIds(questionsRouter);
 
 const VALID_TYPES: readonly string[] = Object.values(FLOW.QUESTION_TYPE);
 const VALID_DIFFICULTIES: readonly string[] = Object.values(FLOW.DIFFICULTY);
@@ -243,3 +249,4 @@ questionsRouter.delete('/:id', requireAuth, requireAdmin, adminWriteLimit, async
     res.status(500).json({ error: 'Erreur lors de la suppression' });
   }
 });
+

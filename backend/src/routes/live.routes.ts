@@ -3,8 +3,14 @@ import { db } from '../db/index.ts';
 import { events } from '../db/schema.ts';
 import { desc, eq } from 'drizzle-orm';
 import { calculateRankings, getLiveState } from '../server/matchEngine.ts';
+import { validateIds } from '../lib/validate.ts';
 
 export const liveRouter = Router();
+
+// Valide :id et :memberId une seule fois pour toutes les routes de ce
+// routeur : 400 explicite sur un identifiant malforme, au lieu d'un NaN
+// qui partait en requete SQL et revenait en 404 trompeur ou en 500.
+validateIds(liveRouter);
 
 /**
  * Résout l'événement « courant » : le plus récent par id.
@@ -64,3 +70,4 @@ liveRouter.get('/api/events/:id/live', async (req, res: Response) => {
     res.status(500).json({ error: 'Erreur lors du chargement du flux Live' });
   }
 });
+

@@ -6,8 +6,14 @@ import { requireAuth, requireAdmin, requireJuryOrAdmin, type AuthRequest } from 
 import { logAudit } from '../server/matchEngine.ts';
 import { isForeignKeyViolation, FK_DELETE_MESSAGES } from '../lib/dbErrors.ts';
 import { adminWriteLimit } from '../middleware/rateLimit.ts';
+import { validateIds } from '../lib/validate.ts';
 
 export const participantsRouter = Router();
+
+// Valide :id et :memberId une seule fois pour toutes les routes de ce
+// routeur : 400 explicite sur un identifiant malforme, au lieu d'un NaN
+// qui partait en requete SQL et revenait en 404 trompeur ou en 500.
+validateIds(participantsRouter);
 
 // Données personnelles de participants (date de naissance, téléphone, email,
 // photo) : lection et pour des mineurs. Accès restreint au staff connecté —
@@ -115,3 +121,4 @@ participantsRouter.delete('/:id', requireAuth, requireAdmin, adminWriteLimit, as
     res.status(500).json({ error: 'Erreur lors de la suppression du participant' });
   }
 });
+

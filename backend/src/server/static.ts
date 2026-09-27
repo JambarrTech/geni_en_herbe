@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import httpProxy from 'http-proxy';
+import { securityHeaders } from '../lib/securityHeaders.ts';
 import { CONFIG } from '../config.ts';
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
@@ -57,8 +58,22 @@ proxy.on('error', ((
   }
 }) as (...args: unknown[]) => void);
 
+/**
+ * Applique les en-têtes de sécurité.
+ *
+ * Ce serveur n'est pas une application Express mais un serveur Node qui
+ * traite `request` puis, parfois, `upgrade` : monter un intergiciel complet
+ * serait artificiel. On isole donc la logique dans une fonction appelable
+ * directement, pour n'avoir qu'une seule définition à maintenir.
+ */
+const applySecurityHeaders = (req: http.IncomingMessage, res: http.ServerResponse) => {
+  securityHeaders({ serveDocuments: true })(req as never, res as never, () => {});
+};
+
 // --- Sonde de vivacité (avant tout le reste) ------------------------------
 server.on('request', (req, res) => {
+  // La sonde passe avant la CSP : une sonde qui dépend de la politique de
+  // sécurité est une sonde qui tombe au premier durcissement.
   if (req.url === '/__static_health') {
     res.setHeader('Content-Type', 'application/json');
     res.end(
@@ -72,6 +87,16 @@ server.on('request', (req, res) => {
     );
     return;
   }
+
+  // En-têtes de sécurité sur les DOCUMENTS.
+  //
+  // C'est ici, et uniquement ici, qu'ils sont efficaces : une CSP ne gouverne
+  // que le document qu'elle accompagne, et ce processus est le seul à servir
+  // du HTML. Pendant la séparation des serveurs, ces en-têtes étaient restés
+  // sur le processus API — qui ne sert que du JSON : aucun écran n'était
+  // protégé. Le bug était invisible, les en-têtes étant bel et bien « poses ».
+  applySecurityHeaders(req, res);
+
   staticHandler(req, res);
 });
 

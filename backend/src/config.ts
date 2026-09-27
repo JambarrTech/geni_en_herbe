@@ -93,6 +93,19 @@ export const CONFIG = {
   WS_MAX_PAYLOAD_BYTES: 1024 * 1024, // 1 Mo
 } as const;
 
+/**
+ * Le serveur fonctionne-t-il en production ?
+ *
+ * Centralisé parce que la réponse conditionne des décisions de sécurité
+ * inversées : la pose de HSTS, notamment, doit être impossible en
+ * développement. Un navigateur ayant mémorisé une directive HSTS refuse ensuite
+ * http://localhost pendant toute sa durée — le poste devient inutilisable
+ * jusqu'à l'expiration du cache, pour un simple `npm run dev`.
+ */
+export function isProduction(): boolean {
+  return process.env.NODE_ENV === 'production';
+}
+
 // Enums métier : évitent les chaînes en dur dispersées dans la logique
 export const FLOW = {
   MATCH_STATUS: {

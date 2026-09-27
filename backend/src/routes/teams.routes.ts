@@ -8,8 +8,14 @@ import { isForeignKeyViolation, FK_DELETE_MESSAGES } from '../lib/dbErrors.ts';
 import { getSetting } from '../lib/settings.ts';
 import { CONFIG, FLOW } from '../config.ts';
 import { adminWriteLimit } from '../middleware/rateLimit.ts';
+import { validateIds } from '../lib/validate.ts';
 
 export const teamsRouter = Router();
+
+// Valide :id et :memberId une seule fois pour toutes les routes de ce
+// routeur : 400 explicite sur un identifiant malforme, au lieu d'un NaN
+// qui partait en requete SQL et revenait en 404 trompeur ou en 500.
+validateIds(teamsRouter);
 
 const VALID_TEAM_STATUS: readonly string[] = Object.values(FLOW.TEAM_STATUS);
 
@@ -247,3 +253,4 @@ teamsRouter.post('/:id/members/:memberId/captain', requireAuth, requireAdmin, ad
     res.status(500).json({ error: 'Erreur lors de la promotion en capitaine' });
   }
 });
+

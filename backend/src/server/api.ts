@@ -12,6 +12,7 @@ import { matchesRouter } from '../routes/matches.routes.ts';
 import { liveRouter } from '../routes/live.routes.ts';
 import { adminRouter } from '../routes/admin.routes.ts';
 import { usersRouter } from '../routes/users.routes.ts';
+import { securityHeaders } from '../lib/securityHeaders.ts';
 
 /**
  * Constructeur de l'application API.
@@ -37,29 +38,11 @@ export function createApiApp(): express.Express {
   }
 
   app.disable('x-powered-by');
-  app.use((_req, res, next) => {
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
-    res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
-    res.setHeader(
-      'Content-Security-Policy',
-      [
-        "default-src 'self'",
-        "script-src 'self' https://apis.google.com https://www.gstatic.com",
-        "style-src 'self' 'unsafe-inline'",
-        "img-src 'self' data: https:",
-        "font-src 'self' data:",
-        "connect-src 'self' https://*.googleapis.com",
-        "object-src 'none'",
-        "base-uri 'self'",
-        "form-action 'self'",
-        "frame-ancestors 'none'",
-      ].join('; ')
-    );
-    next();
-  });
+  // L'API ne sert que du JSON : la politique est durcie au maximum (ni image,
+  // ni police, ni style). La politique destinée aux documents — celle qui
+  // governera réellement les écrans — est posée par le processus `static`,
+  // seul à servir du HTML. Voir lib/securityHeaders.ts.
+  app.use(securityHeaders({ serveDocuments: false }));
 
   app.use(express.json({ limit: CONFIG.JSON_BODY_LIMIT }));
 

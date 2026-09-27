@@ -90,7 +90,21 @@ authRouter.post('/login', async (req: Request, res: Response) => {
       .from(users)
       .where(eq(users.email, normalizedEmail));
 
-    if (!user || !user.passwordHash || !verifyPassword(password, user.passwordHash)) {
+    // La vérification est asynchrone : scrypt s'exécute dans le pool de threads,
+    // l'event loop n'est pas figé pendant le calcul. Une rafale de tentatives
+    // ne peut donc plus paralyser ni le chrono ni la diffusion — ce qui, depuis
+    // la séparation des serveurs, ne gelaient plus le même processus, mais
+    // paralyserait encore toutes les autres requêtes de l'API.
+    //
+    // `await` AVANT la comparaison : sans lui, un email inconnu court-circuiterait
+    // la vérification et repondaitait plus vite qu'un email valide. Cette
+    // différence de temps révélerait quels comptes existent. Le `||` force donc
+    // le calcul dans les deux cas.
+    const passwordMatches = user?.passwordHash
+      ? await verifyPassword(password, user.passwordHash)
+      : false;
+
+    if (!user || !user.passwordHash || !passwordMatches) {
       registerFailure(key);
       loginIpFailures.penalize(ipKey);
       return res.status(401).json({ error: 'Identifiants invalides' });

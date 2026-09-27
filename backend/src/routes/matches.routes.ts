@@ -22,8 +22,14 @@ import { getSetting } from '../lib/settings.ts';
 import { selectQuestionsForMatch } from '../lib/selectQuestions.ts';
 import { scoreLimit, controlLimit, adminWriteLimit } from '../middleware/rateLimit.ts';
 import { CONFIG, FLOW } from '../config.ts';
+import { validateIds } from '../lib/validate.ts';
 
 export const matchesRouter = Router();
+
+// Valide :id et :memberId une seule fois pour toutes les routes de ce
+// routeur : 400 explicite sur un identifiant malforme, au lieu d'un NaN
+// qui partait en requete SQL et revenait en 404 trompeur ou en 500.
+validateIds(matchesRouter);
 
 function winnerTeamIdOf(m: { teamAId: number; teamBId: number; scoreA: number; scoreB: number }): number | null {
   if (m.scoreA > m.scoreB) return m.teamAId;
