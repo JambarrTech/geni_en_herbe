@@ -2,22 +2,18 @@ import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext.tsx';
 import { errorMessage } from '../lib/api.ts';
 import { APP_CONFIG } from '../lib/config.ts';
-import { AeerksLogo } from '../components/AeerksLogo.tsx';
 import {
   Lock,
   Mail,
   ArrowRight,
   AlertCircle,
   Loader2,
-  ShieldCheck,
-  Tv,
-  Sparkles,
   Eye,
   EyeOff,
   LogIn,
 } from 'lucide-react';
 
-/** Édition affichée : issue de la configuration, plus de « 2026 » en dur. */
+/** Édition affichée dans le pied de page : issue de la configuration. */
 const EDITION = APP_CONFIG.DEFAULT_EVENT_EDITION.replace(/^Édition\s+/i, '').trim();
 
 export const LoginPage: React.FC = () => {
@@ -77,89 +73,19 @@ export const LoginPage: React.FC = () => {
         className="absolute -bottom-40 -right-24 w-[28rem] h-[28rem] rounded-full bg-amber-500/10 blur-3xl pointer-events-none"
       />
 
-      <main className="relative z-10 w-full max-w-5xl my-auto">
-        <div className="grid lg:grid-cols-[1fr_1.1fr] overflow-hidden rounded-3xl border border-white/15 shadow-2xl shadow-black/40 bg-white/5">
-          {/* ============ PANNEAU IDENTITÉ ============ */}
-          <aside className="relative flex flex-col justify-between gap-8 p-8 sm:p-10 bg-gradient-to-br from-[#0B3B82]/90 to-[#071E42] border-b lg:border-b-0 lg:border-r border-white/10 overflow-hidden">
-            <div
-              aria-hidden="true"
-              className="absolute inset-0 bg-[radial-gradient(#2563EB_1px,transparent_1px)] [background-size:18px_18px] opacity-20 pointer-events-none"
-            />
-
-            <div className="relative flex items-center gap-4">
-              <AeerksLogo size="lg" priority />
-              <div className="min-w-0">
-                <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-blue-200">
-                  AEERKS
-                </div>
-                <div className="text-lg font-black text-white leading-tight">
-                  Journée d'Excellence
-                </div>
-                <div className="text-xs font-semibold text-blue-300">Génie en Herbe</div>
-              </div>
+      <main className="relative z-10 w-full max-w-md my-auto">
+        {/* Panneau identité retiré : la grille à deux colonnes qu'il occupait
+            n'a plus lieu d'être, le formulaire est seul et centré. */}
+        <div className="bg-white p-6 sm:p-8 rounded-3xl shadow-2xl shadow-black/40 ring-1 ring-white/15">
+          <div className="text-center mb-8">
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[#0B3B82] mb-2">
+              Espace de Connexion
             </div>
-
-            {/* Sur mobile le panneau reste visible (il était masqué en
-                `hidden lg:flex`) : c'est là que se trouve l'identité AEERKS,
-                qui disparaissait purement et simplement sur téléphone. */}
-            <div className="relative space-y-5">
-              <div>
-                <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-400/15 border border-amber-300/30 text-amber-300 text-[11px] font-black uppercase tracking-widest">
-                  <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
-                  Plateforme Officielle {EDITION}
-                </span>
-                <h2 className="mt-4 text-xl sm:text-2xl font-black text-white leading-snug">
-                  Les coulisses de la compétition, à portée de main.
-                </h2>
-              </div>
-
-              <ul className="hidden sm:grid sm:gap-3.5 sm:text-sm">
-                <li className="flex items-start gap-3">
-                  <span className="w-8 h-8 shrink-0 rounded-xl bg-[#2563EB]/25 border border-[#2563EB]/30 flex items-center justify-center">
-                    <ShieldCheck className="w-4 h-4 text-blue-300" aria-hidden="true" />
-                  </span>
-                  <span className="text-blue-100/90">
-                    <span className="block font-bold text-white">Arbitrage &amp; scores</span>
-                    Chrono maîtrisé et résultats signés par le jury
-                  </span>
-                </li>
-                <li className="flex items-start gap-3">
-                  <span className="w-8 h-8 shrink-0 rounded-xl bg-[#2563EB]/25 border border-[#2563EB]/30 flex items-center justify-center">
-                    <Tv className="w-4 h-4 text-blue-300" aria-hidden="true" />
-                  </span>
-                  <span className="text-blue-100/90">
-                    <span className="block font-bold text-white">Diffusion en direct</span>
-                    Tout s'affiche instantanément sur l'écran public
-                  </span>
-                </li>
-                <li className="flex items-start gap-3">
-                  <span className="w-8 h-8 shrink-0 rounded-xl bg-amber-400/15 border border-amber-300/30 flex items-center justify-center">
-                    <Sparkles className="w-4 h-4 text-amber-300" aria-hidden="true" />
-                  </span>
-                  <span className="text-blue-100/90">
-                    <span className="block font-bold text-white">Traçabilité totale</span>
-                    Chaque décision est consignée au journal d'audit
-                  </span>
-                </li>
-              </ul>
-            </div>
-
-            <p className="relative text-[11px] leading-relaxed text-blue-300/70">
-              Amicale des Élèves et Étudiants Ressortissants de Keur Salla Mbatta
+            <h2 className="text-2xl font-black text-slate-900 tracking-tight">Bienvenue</h2>
+            <p className="text-sm text-slate-500 mt-1">
+              Accédez à votre espace jury ou à l'administration de la compétition.
             </p>
-          </aside>
-
-          {/* ============ FORMULAIRE ============ */}
-          <div className="bg-white p-6 sm:p-10">
-            <div className="text-center lg:text-left mb-8">
-              <div className="text-[11px] font-bold uppercase tracking-widest text-[#0B3B82] mb-2">
-                Espace de Connexion
-              </div>
-              <h2 className="text-2xl font-black text-slate-900 tracking-tight">Bienvenue</h2>
-              <p className="text-sm text-slate-500 mt-1">
-                Accédez à votre espace jury ou à l'administration de la compétition.
-              </p>
-            </div>
+          </div>
 
             {error && (
               <div
@@ -339,7 +265,6 @@ export const LoginPage: React.FC = () => {
                 Retourner à l'écran Live public
               </a>
             </div>
-          </div>
         </div>
 
         <p className="text-center text-xs text-blue-200/60 mt-6">
