@@ -9,9 +9,10 @@
   ],
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "serve": "node scripts/serve.mjs",
     "build": "node scripts/build.mjs",
     "typecheck": "node scripts/typecheck.mjs",
-    "lint": "eslint apps/*/src shared",
+    "lint": "eslint apps/live/src apps/jury/src apps/admin/src shared backend/src",
     "test": "node --import tsx --test backend/test/*.test.mjs"
   },
   "devDependencies": {

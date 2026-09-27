@@ -11,9 +11,17 @@ import {
 import { eq, desc } from 'drizzle-orm';
 import { type TeamRanking, type LiveStatePayload } from '../types.ts';
 import { publicQuestion } from '../lib/sanitize.ts';
+import { publish as publishBusEvent } from './pubsub.ts';
 import { CONFIG, FLOW } from '../config.ts';
 
-// Web socket broadcast callback hook
+// Web socket broadcast callback hook.
+//
+// L'API et le serveur WebSocket sont deux processus distincts : ce rappel en
+// mémoire n'est donc plus le canal de diffusion principal. Il ne subsiste que
+// pour le mode « tout-en-un » (npm run dev:all), où un seul processus héberge
+// tout. En fonctionnement séparé, la diffusion transite par le bus
+// PostgreSQL LISTEN/NOTIFY (cf. server/pubsub.ts) : `broadcast()` publie, et le
+// serveur WebSocket relaie.
 type BroadcastFn = (event: string, data: any) => void;
 let broadcastCallback: BroadcastFn | null = null;
 
@@ -22,6 +30,12 @@ export function setBroadcastCallback(fn: BroadcastFn) {
 }
 
 export function broadcast(event: string, data: any) {
+  // 1. Bus inter-processus : c'est lui qui atteint le serveur WebSocket.
+  void publishBusEvent({ type: event, data }).catch((err) => {
+    console.error(`Diffusion « ${event} » impossible via le bus:`, err);
+  });
+
+  // 2. Rappel en mémoire, seulement s'il existe (mode monolithique).
   if (broadcastCallback) {
     broadcastCallback(event, data);
   }
@@ -361,7 +375,7 @@ export async function getLiveState(eventId?: number, includeRankings = false): P
     .orderBy(matches.matchNumber);
 
   // Identify active match (LIVE or PAUSED or first READY)
-  let activeMatchRaw =
+  const activeMatchRaw =
     allMatches.find((m) => m.status === FLOW.MATCH_STATUS.LIVE || m.status === FLOW.MATCH_STATUS.PAUSED) ||
     allMatches.find((m) => m.status === FLOW.MATCH_STATUS.READY) ||
     null;

@@ -13,10 +13,65 @@ qui partagent du code commun dans `shared/` (alias `@shared` dans chaque app).
 | `apps/jury`  | `/jury`      | Table d'arbitrage : lancement, chrono, score | 5174     |
 | `apps/admin` | `/admin`     | Comité : événements, équipes, questions, ... | 5175     |
 
-- **Backend** : `backend/` (Express + WebSocket + PostgreSQL/Drizzle), API REST sous `/api`,
-  diffusion temps réel sur `/ws`, sert les trois builds en production (`NODE_ENV=production`).
-- **Code mutualisé** : `shared/` (client HTTP, contexte auth, contexte live, composant `<Modal>`,
-  types, config, logo, page de connexion).
+- **Backend** : `backend/` (Express + WebSocket + PostgreSQL/Drizzle).
+- **Code mutualisé** : `shared/` (client HTTP, contexte auth, contexte live, `<Modal>`,
+  primitives d'interface, types, config, logo, page de connexion).
+
+### Les quatre processus de l'backend
+
+L'API, la diffusion temps réel, la boucle de chrono et les fichiers statiques
+sont **quatre processus séparés**, chacun sur son port. Un blocage, un crash ou
+un redéploiement de l'un n'affecte pas les autres.
+
+| Processus   | Port  | Rôle                                          | Sonde                    |
+| ----------- | ----- | --------------------------------------------- | ------------------------ |
+| `api`       | 4000  | Routes REST `/api`                            | `GET /api/health`        |
+| `ws`        | 4001  | Diffusion temps réel `/ws`                    | `GET /`                  |
+| `worker`    | 4002  | Boucle de chrono (tâche de fond, ~1 s)         | `GET /`                  |
+| `static`    | 4003  | Sert `apps/*/dist` **+ reverse proxy**        | `GET /__static_health`   |
+
+Chaque port est surchargeable (`API_PORT`, `WS_PORT`, `WORKER_PORT`,
+`STATIC_PORT`), avec les valeurs par défaut dans `backend/src/config.ts`.
+
+**Le reverse proxy est indispensable.** Les trois apps sont servies sur
+l'origine 4003 et appellent `/api/...` et `wss://<hôte>/ws`. Le processus
+`static` relaie donc :
+
+```
+/api  ->  API_PORT      /ws  ->  WS_PORT
+```
+
+C'est le rôle que joue Vite en développement, et que joue nginx en
+production. Sans cela, la page servie par `static` ne trouverait ni son API ni
+son WebSocket. Le code client reste inchangé : pas de CORS, pas de cookie
+inter-origines, pas de modification de la CSP.
+
+**Diffusion inter-processus.** L'API ne rappelle plus le serveur WebSocket en
+mémoire : elle publie sur un canal PostgreSQL `LISTEN/NOTIFY`
+(`backend/src/server/pubsub.ts`), que le processus `ws` consomme. La
+notification n'est délivrée qu'au commit de la transaction émettrice, donc un
+score n'est jamais diffusé avant d'être validé. Si `ws` tombe, l'API continue
+de fonctionner et les clients se resynchronisent à la reconnexion.
+
+> **Attention au déploiement horizontal.** Un seul worker doit tourner à la
+> fois : deux boucles de chrono se disputeraient la même ligne. Les sessions
+> sont aussi en mémoire et ne sont pas partagées entre instances. Ces deux
+> points doivent être réglés avant de passer à plusieurs instances.
+
+### Démarrage
+
+```bash
+npm run serve              # les 4 processus
+npm run serve -- api ws    # une sélection
+cd backend && npm run start:worker   # ou un seul, dans un autre terminal
+```
+
+En développement avec rechargement à chaud :
+
+```bash
+npm run dev                 # API + les trois apps Vite (proxy Vite vers l'API)
+cd backend && npm run dev:worker   # boucle de chrono, terminal séparé
+```
 
 ## Démarrage
 
@@ -56,10 +111,19 @@ qui partagent du code commun dans `shared/` (alias `@shared` dans chaque app).
 ## Vérification
 
 ```bash
-npm run lint        # ESLint (flat config, plugin react-hooks)
+npm run lint        # ESLint (flat config, plugin react-hooks, y compris backend/)
 npm run typecheck   # tsc --noEmit sur backend + les 3 apps
 npm test            # tests des règles métier (node:test, aucune dépendance)
 npm run build       # build de production
+```
+
+Tests d'intégration exigeant les 4 processus démarrés (`npm run serve`) :
+
+```bash
+cd backend
+node --import tsx test/bus-cross-process.mjs   # la diffusion franchit-elle la frontière de processus ?
+node --import tsx test/prod-chain.mjs          # statique -> proxy -> API et WS
+node --import tsx test/static-traversal.mjs    # traversée de répertoire (HTTP brut)
 ```
 
 `noUnusedLocals` / `noUnusedParameters` sont activés dans les quatre `tsconfig.json` :

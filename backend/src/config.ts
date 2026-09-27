@@ -41,14 +41,28 @@ export const CONFIG = {
   DB_CONNECT_TIMEOUT_MS: 15 * 1000,
   DB_POOL_MAX: 10,
 
-  // --- Serveur HTTP ---
-  // Port par défaut du backend. Surchargeable par la variable d'environnement
-  // PORT (cf. backend/src/index.ts). Doit rester aligné sur la valeur par
-  // défaut des trois vite.config.ts et de scripts/dev.mjs.
-  PORT_DEFAULT: 4000,
+  // --- Serveurs HTTP (processus séparés) ---
+  // L'application est découpée en quatre processus indépendants, chacun sur
+  // son port, surchargeable par variable d'environnement. Objectif : qu'un
+  // blocage, un crash ou un redéploiement de l'un n'affecte pas les autres.
+  //   API      : routes REST /api            -> API_PORT       (ou PORT)
+  //   WS       : diffusion temps réel /ws     -> WS_PORT
+  //   WORKER   : boucle de chrono (tâche de fond) -> WORKER_PORT (écoute /health)
+  //   STATIC   : sert apps/*/dist             -> STATIC_PORT
+  API_PORT: 4000,
+  WS_PORT: 4001,
+  WORKER_PORT: 4002,
+  STATIC_PORT: 4003,
   JSON_BODY_LIMIT: '1mb',
   // TTL de cache des assets versionnés par hash (immuables)
   STATIC_IMMUTABLE_MAX_AGE_MS: 365 * 24 * 60 * 60 * 1000, // 1 an
+
+  // --- Bus d'événements inter-processus ---
+  // L'API produit les événements, le serveur WS les consomme. Le transport est
+  // PostgreSQL LISTEN/NOTIFY : aucune infrastructure supplémentaire, et la
+  // livraison n'a lieu qu'au commit de la transaction émettrice.
+  PUBSUB_CHANNEL: 'aeerks_events',
+  PUBSUB_RECONNECT_MS: 3000,
 
   // --- WebSocket ---
   WS_CLOSE_INVALID_AUTH: 1008,
