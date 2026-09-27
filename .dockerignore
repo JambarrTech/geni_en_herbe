@@ -1,0 +1,38 @@
+# Contexte de construction : le contexte est la RACINE du dépôt, car le
+# Dockerfile a besoin des trois apps, de `shared/` et du backend.
+
+# Dépendances : réinstallées dans l'image. Lesangler évite plusieurs gigas
+# octets de contexte et des invalidections de cache inutiles.
+node_modules
+**/node_modules
+# Builds : le Dockerfile les recompile dans l'étape `apps-build`. Les inclure
+# n'apporterait rien et risquerait d'embarquer des artefacts périmés.
+**/dist
+
+# Secrets : ne doivent JAMAIS entrer dans une image, même sur un layer tardif.
+# Un secret versionné dans un Dockerfile est published dans l'historique de
+# l'image, et l'historique ne se réécrit pas.
+.env
+.env.*
+backend/.env
+firebase-applet-config.json
+
+# Sources de versionnement et fichiers de travail
+.git
+.gitignore
+.gitattributes
+.vscode
+.idea
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# Artefacts de la base : les migrations sont déjà dans backend/drizzle, et les
+# fichiers de travail de drizzle-kit ne doivent pas être embarqués.
+backend/drizzle/meta/_journal.json.tmp
+
+# Documentation et fichiers non nécessaires à l'exécution
+*.md
+!README.md
+metadata.json

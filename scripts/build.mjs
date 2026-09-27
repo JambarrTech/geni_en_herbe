@@ -67,4 +67,26 @@ await cleanDist();
 await Promise.all(apps.map(build));
 await reportSizes();
 
+// Le build « réussit » au sens de Vite même quand l'interface est cassée :
+// une classe Tailwind absente ne fait pas échouer le bundler. Or c'est
+// exactement ce qui est arrivé — `shared/` n'était pas déclaré comme source,
+// et pages de connexion, barre de navigation et modales n'avaient aucune règle
+// applicable, sans que typecheck, ESLint ni grep de bundle ne le remarquent.
+//
+// On vérifie donc la SUBSTANCE des artefacts, pas leur présence. Le script
+// échoue si une classe utilisée n'a produit aucune règle CSS.
+console.log('\n[build] Vérification du CSS produit...');
+const verify = spawn(process.execPath, ['scripts/verify-build-output.mjs'], {
+  stdio: 'inherit',
+  shell: false,
+});
+await new Promise((resolve, reject) => {
+  verify.on('error', reject);
+  verify.on('exit', (code) =>
+    code === 0
+      ? resolve()
+      : reject(new Error(`Vérification du CSS échouée (code ${code})`))
+  );
+});
+
 console.log('\n[build] Toutes les apps sont compilées dans apps/*/dist (servies par le backend).');

@@ -1,0 +1,165 @@
+name: CI
+
+# Le pipeline reproduit exactement les quatre vérifications lancées en local
+# (`npm run lint`, `npm run typecheck`, `npm test`, `npm run build`). Rien
+# d'autre n'est ajouté : une vérification qui ne tourne pas localement ne doit
+# pas non plus tourner en CI, sinon elle devient un faux signal de sécurité.
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  # Permet de tester une branche avant d'ouvrir une pull request.
+  workflow_dispatch:
+
+# Une exécution obsolète n'apporte rien et consomme des minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '24'
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Vérifications applicatives
+  # ---------------------------------------------------------------------------
+  verify:
+    name: lint · typecheck · tests · build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      # Les dépendances du backend sont dans un arbre séparé (npm workspaces ne
+      # couvre que `apps/*`), donc il faut deux installations.
+      - name: Installer les dépendances
+        run: |
+          npm ci
+          npm ci --prefix backend
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
+
+      # `npm run build` inclut déjà la vérification du CSS produit
+      # (scripts/verify-build-output.mjs) : le build échoue si une classe
+      # Tailwind utilisée n'a produit aucune règle. C'est la régression où
+      # `shared/` n'était pas déclaré comme source — l'interface entièrement
+      # déshabillée, sans que typecheck, ESLint ni grep de bundle ne le remarquent.
+      - name: Build
+        run: npm run build
+
+      # L'état ESLint est publié hors du rapport : la console ne montre que
+      # l'essentiel, le détail complet va dans l'artefact.
+      - name: Publier le rapport ESLint
+        if: always()
+        run: npx eslint apps/live/src apps/jury/src apps/admin/src shared backend/src --format json > eslint-report.json || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eslint-report
+          path: eslint-report.json
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Sonde de concurrence : la preuve, pas l'intention
+  # ---------------------------------------------------------------------------
+  # Le verrou de ligne sur le score est la correction la plus grave du projet.
+  # Un test qui « passe » sans reproduire le défaut ne prouve rien : cette étape
+  # exige donc que le CONTROLE casse, sinon elle échoue.
+  concurrency-probe:
+    name: Sonde lost update (avec et sans verrou)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: aeerks
+          POSTGRES_PASSWORD: aeerks
+          POSTGRES_DB: aeerks
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aeerks -d aeerks"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Installer les dépendances du backend
+        run: npm ci --prefix backend
+
+      - name: Sonde de concurrence
+        env:
+          DATABASE_URL: postgres://aeerks:aeerks@localhost:5432/aeerks
+        run: |
+          cd backend
+          node --import tsx test/probe-lost-update-fixed.mjs
+
+  # ---------------------------------------------------------------------------
+  # Image de production
+  # ---------------------------------------------------------------------------
+  docker:
+    name: Construction de l'image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: verify
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Construire l'image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          target: runtime
+          push: false
+          load: true
+          tags: aeerks/backend:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Une image qui se construit mais ne démarre pas ne sert à rien. On
+      # vérifie que le point d'entrée par défaut répond.
+      - name: Vérifier que l'image démarre et répond
+        run: |
+          docker run -d --name aeerks-ci -p 4000:4000 aeerks/backend:ci
+          # On attend la sonde de santé du conteneur plutôt qu'un sleep fixe.
+          for i in $(seq 1 30); do
+            if docker exec aeerks-ci wget -qO- http://127.0.0.1:4000/api/health; then
+              echo ""
+              echo "L'image repond sur /api/health."
+              docker rm -f aeerks-ci
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "L'image ne repond pas."
+          docker logs aeerks-ci || true
+          docker rm -f aeerks-ci
+          exit 1
