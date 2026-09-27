@@ -13,7 +13,9 @@
     "build": "node scripts/build.mjs",
     "typecheck": "node scripts/typecheck.mjs",
     "lint": "eslint apps/live/src apps/jury/src apps/admin/src shared backend/src",
-    "test": "node --import tsx --test backend/test/*.test.mjs"
+    "test": "node --import tsx --test backend/test/*.test.mjs",
+    "verify:css": "node scripts/verify-build-output.mjs",
+    "verify:coverage": "node scripts/audit-css-coverage.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",

@@ -86,6 +86,9 @@ export const JuryDashboard: React.FC = () => {
   const actionUnlockTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Confirmation de clôture : action irréversible, donc deux temps.
+  const [confirmClose, setConfirmClose] = useState(false);
+
   useEffect(
     () => () => {
       detailsAbort.current?.abort();
@@ -355,15 +358,26 @@ export const JuryDashboard: React.FC = () => {
     }
   };
 
-  const handleFinishMatch = () => {
+  /**
+   * Clôture du match.
+   *
+   * L'action est destructive et IRRÉVERSIBLE : elle fige les scores finaux.
+   * D'où une confirmation explicite.
+   *
+   * `window.confirm` est remplacé par un dialogue natif de l'application, pour
+   * trois raisons concrètes :
+   *  - la boîte native ignore le design system, apparaît dans la langue du
+   *    navigateur au milieu d'une interface en français, et rompt l'immersion
+   *    en plein direct, devant un public ;
+   *  - son rendu varie selon le système : impossible d'y loger l'état du match
+   *    (équipes, score), qui est précisément ce qui rend la décision éclairée ;
+   *  - le focus et le piège de tabulation n'y sont pas maîtrisés.
+   *
+   * L'ouverture est déjà gérée par `requestCloseMatch` : ce handler n'est
+   * appelé qu'UNE fois la confirmation donnée.
+   */
+  const confirmFinishMatch = () => {
     if (selectedMatchId == null) return;
-    if (
-      !window.confirm(
-        'Êtes-vous certain de vouloir clôturer officiellement ce match ? Cette action fige les scores finaux.'
-      )
-    ) {
-      return;
-    }
     void runAction('Clôture', async () => {
       await api.post(`/api/matches/${selectedMatchId}/finish`);
       showFeedback('Le match est officiellement terminé !');
@@ -371,6 +385,11 @@ export const JuryDashboard: React.FC = () => {
       void loadMatches();
       void refreshLiveState();
     });
+  };
+
+  const requestCloseMatch = () => {
+    if (selectedMatchId == null) return;
+    setConfirmClose(true);
   };
 
   const currentQ: (QuestionItem & { categoryName?: string }) | null =
@@ -585,14 +604,14 @@ export const JuryDashboard: React.FC = () => {
               >
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-extrabold uppercase px-2.5 py-1 rounded-md bg-blue-50 text-[#0B3B82] border border-blue-100">
+                    <span className="text-xs font-semibold uppercase px-2.5 py-1 rounded-md bg-blue-50 text-[#0B3B82] border border-blue-100">
                       Équipe A • {matchDetails.teamA?.code || 'EQ-A'}
                     </span>
                     <span className="text-xs text-slate-500 font-medium">
                       {matchDetails.teamA?.code || 'Équipe A'}
                     </span>
                   </div>
-                  <h3 className="text-xl font-black text-slate-900 leading-snug">
+                  <h3 className="text-xl font-bold text-slate-900 leading-snug">
                     {matchDetails.teamA?.name}
                   </h3>
                 </div>
@@ -600,7 +619,7 @@ export const JuryDashboard: React.FC = () => {
                 <div className="my-6 text-center">
                   <span
                     aria-label={`Score équipe A : ${matchDetails.scoreA} points`}
-                    className="text-6xl sm:text-7xl font-black tracking-tight text-[#0B3B82]"
+                    className="text-6xl sm:text-7xl font-bold tabular-nums tracking-tight text-[#0B3B82]"
                   >
                     {matchDetails.scoreA}
                   </span>
@@ -672,7 +691,7 @@ export const JuryDashboard: React.FC = () => {
               <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-5 shadow-xs flex flex-col items-center justify-between text-center">
                 <div className="w-full">
                   <span
-                    className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-extrabold uppercase tracking-wider ${
+                    className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wider ${
                       matchDetails.status === 'LIVE'
                         ? 'bg-emerald-100 text-emerald-800 animate-pulse'
                         : matchDetails.status === 'PAUSED'
@@ -708,7 +727,7 @@ export const JuryDashboard: React.FC = () => {
                         : 'border-slate-300 bg-slate-50 text-slate-600'
                     }`}
                   >
-                    <span className="text-4xl font-black tracking-tight">{timerLeft}</span>
+                    <span className="text-4xl font-bold tabular-nums tracking-tight">{timerLeft}</span>
                     <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                       secondes
                     </span>
@@ -794,8 +813,8 @@ export const JuryDashboard: React.FC = () => {
                         id="btn-match-finish-global"
                         type="button"
                         disabled={actionLoading}
-                        onClick={handleFinishMatch}
-                        className="w-full py-1.5 px-3 rounded-xl border border-slate-300 hover:bg-rose-50 hover:border-rose-300 hover:text-rose-700 text-slate-600 text-[11px] font-semibold transition-colors disabled:opacity-40"
+                        onClick={requestCloseMatch}
+                        className="w-full py-1.5 px-3 rounded-xl border border-slate-300 hover:bg-rose-50 hover:border-rose-300 hover:text-rose-700 text-slate-600 text-[11px] font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-1 disabled:opacity-40"
                       >
                         Clôturer le match
                       </button>
@@ -812,14 +831,14 @@ export const JuryDashboard: React.FC = () => {
               >
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-extrabold uppercase px-2.5 py-1 rounded-md bg-blue-50 text-[#0B3B82] border border-blue-100">
+                    <span className="text-xs font-semibold uppercase px-2.5 py-1 rounded-md bg-blue-50 text-[#0B3B82] border border-blue-100">
                       Équipe B • {matchDetails.teamB?.code || 'EQ-B'}
                     </span>
                     <span className="text-xs text-slate-500 font-medium">
                       {matchDetails.teamB?.code || 'Équipe B'}
                     </span>
                   </div>
-                  <h3 className="text-xl font-black text-slate-900 leading-snug">
+                  <h3 className="text-xl font-bold text-slate-900 leading-snug">
                     {matchDetails.teamB?.name}
                   </h3>
                 </div>
@@ -827,7 +846,7 @@ export const JuryDashboard: React.FC = () => {
                 <div className="my-6 text-center">
                   <span
                     aria-label={`Score équipe B : ${matchDetails.scoreB} points`}
-                    className="text-6xl sm:text-7xl font-black tracking-tight text-[#0B3B82]"
+                    className="text-6xl sm:text-7xl font-bold tabular-nums tracking-tight text-[#0B3B82]"
                   >
                     {matchDetails.scoreB}
                   </span>
@@ -1015,11 +1034,11 @@ export const JuryDashboard: React.FC = () => {
                     )}
 
                     <div className="p-4 sm:p-5 rounded-2xl bg-emerald-50 border-2 border-emerald-300">
-                      <div className="flex items-center gap-2 text-xs font-extrabold text-emerald-900 uppercase tracking-wider mb-1">
+                      <div className="flex items-center gap-2 text-xs font-semibold text-emerald-900 uppercase tracking-wider mb-1">
                         <CheckCircle2 className="w-4 h-4 text-emerald-600" aria-hidden="true" />
                         <span>Réponse Officielle Attendue du Jury</span>
                       </div>
-                      <div className="text-lg sm:text-xl font-black text-emerald-900">
+                      <div className="text-lg sm:text-xl font-bold text-emerald-900">
                         {currentQ.answer}
                       </div>
                       {currentQ.explanation && (
@@ -1105,7 +1124,7 @@ export const JuryDashboard: React.FC = () => {
                           </div>
                           <div className="flex items-center gap-3">
                             <span
-                              className={`font-black px-2 py-0.5 rounded-md ${
+                              className={`font-bold tabular-nums px-2 py-0.5 rounded-md ${
                                 ev.points > 0
                                   ? 'bg-emerald-50 text-emerald-700'
                                   : ev.points < 0
@@ -1248,6 +1267,64 @@ export const JuryDashboard: React.FC = () => {
             </form>
           </>
         )}
+      </Modal>
+
+      {/* Confirmation de clôture.
+          L'état du match est rappelé ici parce que c'est lui qui rend la
+          décision éclairée : « clôturer » n'a pas le même sens à 3–3 en
+          question 12 qu'à 18–4 en question 3. Le score est donc affiché, pas
+          seulement la formule d'avertissement. */}
+      <Modal
+        open={confirmClose}
+        onClose={() => setConfirmClose(false)}
+        title="Clôturer officiellement ce match ?"
+        busy={actionLoading}
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">
+            Cette action est <strong className="text-slate-800">irréversible</strong> : elle
+            fige les scores finaux du match.
+          </p>
+
+          {matchDetails && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <div className="flex items-center justify-between text-sm font-semibold text-slate-800">
+                <span>{matchDetails.teamA?.name ?? 'Équipe A'}</span>
+                <span className="tabular-nums text-[#0B3B82]">{matchDetails.scoreA}</span>
+              </div>
+              <div className="flex items-center justify-between text-sm font-semibold text-slate-800 mt-1">
+                <span>{matchDetails.teamB?.name ?? 'Équipe B'}</span>
+                <span className="tabular-nums text-[#0B3B82]">{matchDetails.scoreB}</span>
+              </div>
+              <div className="mt-2 pt-2 border-t border-slate-200 text-[11px] text-slate-500">
+                Match #{matchDetails.matchNumber} — {matchDetails.phase} — question{' '}
+                {currentIdx + 1}/{matchQuestionsList.length || '—'}
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => setConfirmClose(false)}
+              disabled={actionLoading}
+              className="px-4 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] disabled:opacity-40"
+            >
+              Continuer le match
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setConfirmClose(false);
+                confirmFinishMatch();
+              }}
+              disabled={actionLoading}
+              className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-1 disabled:opacity-40"
+            >
+              {actionLoading ? 'Clôture…' : 'Clôturer définitivement'}
+            </button>
+          </div>
+        </div>
       </Modal>
     </main>
   );

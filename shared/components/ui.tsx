@@ -1,4 +1,5 @@
 import React from 'react';
+import { AlertTriangle, HelpCircle } from 'lucide-react';
 
 /**
  * Primitives d'interface partagées par les trois apps.
@@ -348,6 +349,154 @@ export const ErrorState: React.FC<ErrorStateProps> = ({
     )}
   </div>
 );
+
+// ---------------------------------------------------------------------------
+// Confirmation d'action
+// ---------------------------------------------------------------------------
+
+export interface ConfirmDialogProps {
+  open: boolean;
+  title: string;
+  /** Conséquence énoncée sans détour : c'est ce qui rend la décision éclairée. */
+  message: string;
+  /** Contenu additionnel : score en cours, nom du compte visé, consequences… */
+  children?: React.ReactNode;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  /** `danger` pour une action irréversible, `primary` sinon. */
+  tone?: 'primary' | 'danger';
+  busy?: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+/**
+ * Confirmation d'une action à conséquence.
+ *
+ * Remplace les `window.confirm` de l'interface.
+ *
+ * Pourquoi ce n'était pas un détail cosmétique :
+ *  - la boîte native s'affiche dans la langue du navigateur, au milieu d'une
+ *    interface en français, et son rendu change d'une machine à l'autre ;
+ *  - elle n'affiche qu'une chaîne : impossible d'y montrer l'état qui rend la
+ *    décision éclairée (le score qu'on s'apprête à figer, le nom du compte
+ *    qu'on supprime). Or c'est précisément ce qui fait la différence entre
+ *    un clic reflexe et une décision réfléchie ;
+ *  - le piège de tabulation et la restitution du focus n'y sont pas maîtrisés,
+ *    alors qu'on y est sur un écran de service, en direct.
+ *
+ * Le `<dialog>` natif est préféré à une `div` superposée : le comportement de
+ * focus et le rôle modal sont fournis par le navigateur.
+ */
+export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
+  open,
+  title,
+  message,
+  children,
+  confirmLabel = 'Confirmer',
+  cancelLabel = 'Annuler',
+  tone = 'primary',
+  busy = false,
+  onConfirm,
+  onCancel,
+}) => {
+  const ref = React.useRef<HTMLDialogElement>(null);
+
+  React.useEffect(() => {
+    const dialog = ref.current;
+    if (!dialog) return;
+    if (open && !dialog.open) {
+      dialog.showModal();
+    } else if (!open && dialog.open) {
+      dialog.close();
+    }
+  }, [open]);
+
+  /**
+   * L'événement natif `close` couvre les DEUX issues possibles : Échap, et
+   * notre propre bouton d'annulation.
+   *
+   * On appelle donc `onCancel` sans condition. Un premier jet le gardait par
+   * `if (open) return`, ce qui était un piège : à la fermeture par Échap, `open`
+   * valait encore `true`, l'appel était ignoré, l'état ne changeait pas, et le
+   * dialogue restait fermé alors que React le croyait ouvert — sans aucune
+   * action pour le rouvrir.
+   *
+   * Appeler `onCancel` deux fois n'a pas de conséquence : c'est un `setState`
+   * vers la même valeur, que React neutralise.
+   *
+   * La restauration du focus, elle, est fournie par le navigateur pour
+   * `<dialog>` en mode modal : inutile de la réimplémenter.
+   */
+  React.useEffect(() => {
+    const dialog = ref.current;
+    if (!dialog) return;
+    const handleClose = () => onCancel();
+    dialog.addEventListener('close', handleClose);
+    return () => dialog.removeEventListener('close', handleClose);
+  }, [onCancel]);
+
+  const handleCancel = () => {
+    if (busy) return;
+    onCancel();
+    ref.current?.close();
+  };
+
+  return (
+    <dialog
+      ref={ref}
+      aria-labelledby="confirm-dialog-title"
+      aria-describedby="confirm-dialog-message"
+      className={[
+        'm-auto w-[min(28rem,calc(100vw-2rem))] rounded-2xl border border-slate-200 bg-white p-0',
+        'shadow-2xl backdrop:bg-slate-900/40',
+        // Le fond n'est pas NRé de flou : le flou de fond coûte cher sur les
+        // écrans de projection et n'apporte rien à la lisibilité.
+      ].join(' ')}
+      // Un clic sur le fond annule, comme dans le reste de l'application.
+      onClick={(e) => {
+        if (e.target === e.currentTarget) handleCancel();
+      }}
+    >
+      <div className="p-5">
+        <div className="flex items-start gap-3">
+          <span
+            aria-hidden="true"
+            className={[
+              'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg',
+              tone === 'danger' ? 'bg-rose-50 text-rose-600' : 'bg-blue-50 text-[#2563EB]',
+            ].join(' ')}
+          >
+            {tone === 'danger' ? (
+              <AlertTriangle className="h-5 w-5" />
+            ) : (
+              <HelpCircle className="h-5 w-5" />
+            )}
+          </span>
+          <div className="min-w-0">
+            <h2 id="confirm-dialog-title" className="text-base font-bold text-slate-900">
+              {title}
+            </h2>
+            <p id="confirm-dialog-message" className="mt-1 text-[13px] leading-relaxed text-slate-600">
+              {message}
+            </p>
+          </div>
+        </div>
+
+        {children && <div className="mt-3">{children}</div>}
+
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="secondary" onClick={handleCancel} disabled={busy}>
+            {cancelLabel}
+          </Button>
+          <Button variant={tone === 'danger' ? 'danger' : 'primary'} onClick={onConfirm} disabled={busy}>
+            {busy ? 'En cours…' : confirmLabel}
+          </Button>
+        </div>
+      </div>
+    </dialog>
+  );
+};
 
 // ---------------------------------------------------------------------------
 // Chargement

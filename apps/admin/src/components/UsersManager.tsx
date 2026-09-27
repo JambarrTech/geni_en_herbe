@@ -3,6 +3,7 @@ import { useAuth } from '@shared/context/AuthContext.tsx';
 import type { UserItem } from '@shared/types.ts';
 import { api, errorMessage, isAbort } from '@shared/lib/api.ts';
 import { Modal } from '@shared/components/Modal.tsx';
+import { ConfirmDialog } from '@shared/components/ui.tsx';
 import { Plus, Trash2, ShieldCheck, ShieldOff, Key } from 'lucide-react';
 
 export const UsersManager: React.FC<{
@@ -12,6 +13,9 @@ export const UsersManager: React.FC<{
   const [usersList, setUsersList] = useState<UserItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+
+  // Compte visé par la suppression, en attente de confirmation.
+  const [userToDelete, setUserToDelete] = useState<UserItem | null>(null);
   const [showResetPw, setShowResetPw] = useState<number | null>(null);
 
   const [newName, setNewName] = useState('');
@@ -115,17 +119,27 @@ export const UsersManager: React.FC<{
     }
   };
 
-  const handleDelete = async (u: UserItem) => {
-    if (
-      !window.confirm(
-        `Supprimer le compte de ${u.name} (${u.email}) ? Cette action est irréversible.`
-      )
-    ) {
+  /**
+   * Demande de suppression : ouvre le dialogue de confirmation.
+   *
+   * La garde « pas son propre compte » est vérifiée ICI, avant d'ouvrir quoi
+   * que ce soit. Elle était placée APRÈS la confirmation : l'administrateur
+   * prenait le temps de lire une confirmation, saisissait « Supprimer », et
+   * discoverait alors que l'action était refusée. Une confirmation ne doit
+   * jamais porter sur une opération vouée à échouer.
+   */
+  const requestDelete = (u: UserItem) => {
+    if (u.id === currentUser?.id) {
+      onMessage?.('Vous ne pouvez pas supprimer votre propre compte', 'error');
       return;
     }
-    if (u.id === currentUser?.id) {
-      return onMessage?.('Vous ne pouvez pas supprimer votre propre compte', 'error');
-    }
+    setUserToDelete(u);
+  };
+
+  const confirmDelete = async () => {
+    if (!userToDelete) return;
+    const u = userToDelete;
+    setUserToDelete(null);
     try {
       await api.delete(`/api/users/${u.id}`);
       onMessage?.('Compte supprimé', 'success');
@@ -241,7 +255,7 @@ export const UsersManager: React.FC<{
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleDelete(u)}
+                  onClick={() => requestDelete(u)}
                   title="Supprimer"
                   aria-label={`Supprimer le compte de ${u.name}`}
                   className="p-1.5 rounded-lg border border-rose-200 hover:bg-rose-50 text-rose-600 disabled:opacity-30"
@@ -391,6 +405,28 @@ export const UsersManager: React.FC<{
           </button>
         </div>
       </Modal>
+
+      <ConfirmDialog
+        open={userToDelete !== null}
+        title="Supprimer ce compte ?"
+        message="Cette action est irréversible. Le compte ne pourra plus se connecter et son historique de décisions sera rattaché à un compte supprimé."
+        tone="danger"
+        confirmLabel="Supprimer définitivement"
+        onConfirm={() => void confirmDelete()}
+        onCancel={() => setUserToDelete(null)}
+      >
+        {userToDelete && (
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5">
+            <div className="text-[13px] font-semibold text-slate-900">{userToDelete.name}</div>
+            <div className="text-[13px] text-slate-600">{userToDelete.email}</div>
+            <div className="mt-1 text-[11px] text-slate-500">
+              Rôle :{' '}
+              {userToDelete.role === 'ADMIN' ? 'Comité d\'Organisation' : 'Membre du Jury'}
+              {userToDelete.active ? '' : ' — déjà désactivé'}
+            </div>
+          </div>
+        )}
+      </ConfirmDialog>
     </div>
   );
 };

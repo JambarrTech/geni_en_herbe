@@ -3,6 +3,7 @@ import { useLive } from '@shared/context/LiveContext.tsx';
 import { APP_CONFIG } from '@shared/lib/config.ts';
 import { api, errorMessage, isAbort } from '@shared/lib/api.ts';
 import { Modal } from '@shared/components/Modal.tsx';
+import { ConfirmDialog } from '@shared/components/ui.tsx';
 import type {
   EventItem,
   ParticipantItem,
@@ -136,6 +137,25 @@ export const AdminDashboard: React.FC = () => {
   const [newMatchTeamA, setNewMatchTeamA] = useState<number | ''>('');
   const [newMatchTeamB, setNewMatchTeamB] = useState<number | ''>('');
 
+  // Confirmations d'actions à conséquence officielle. Auparavant, ces actions
+  // demandaient une validation par `window.confirm` : dialogue hors système,
+  // sans l'état de l'événement, et dont le rendu varie d'une machine à l'autre
+  // pour un acte qui engage la compétition entière.
+  const [confirmPublish, setConfirmPublish] = useState(false);
+  const [confirmUnpublish, setConfirmUnpublish] = useState(false);
+
+  /**
+   * Matchs non clôturés, pour l'aperçu du dialogue de publication.
+   *
+   * Le serveur refuse (409) de publier tant qu'un match n'est pas terminé.
+   * Afficher ce décompte AVANT l'envoi évite au comité d'ouvrir une confirmation
+   * pour une opération qui échouera : l'information est disponible, autant la
+   * donner au bon moment.
+   */
+  const unfinishedMatches = matchesList.filter(
+    (m) => m.status !== 'FINISHED' && m.status !== 'CANCELLED'
+  ).length;
+
   const showToast = useCallback((text: string, type: 'success' | 'error' = 'success') => {
     setMessage({ type, text });
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -221,13 +241,16 @@ export const AdminDashboard: React.FC = () => {
       showToast('Aucun événement courant sélectionné', 'error');
       return;
     }
-    if (
-      !window.confirm(
-        "Voulez-vous officiellement publier les résultats sur l'écran live du public ? Le podium d'honneur s'affichera instantanément."
-      )
-    ) {
-      return;
-    }
+    // La confirmation est portée par un dialogue de l'application, pas par
+    // `window.confirm` : elle affiche le nombre de matchs concerned et le
+    // caractère officiel de l'acte. Publier un podium est un acte
+    // institutionnel, pas un réglage.
+    setConfirmPublish(true);
+  };
+
+  const confirmPublishResults = async () => {
+    if (!currentEvent) return;
+    setConfirmPublish(false);
     try {
       await api.post(`/api/events/${currentEvent.id}/publish-results`);
       showToast("Résultats officiels publiés sur l'écran Live !");
@@ -246,13 +269,12 @@ export const AdminDashboard: React.FC = () => {
     }
     // Confirmation explicite : un clic unique retirait les résultats officiels
     // de l'écran public, sans confirmation.
-    if (
-      !window.confirm(
-        "Retirer les résultats officiels de l'écran public ? Le podium ne sera plus affiché au public."
-      )
-    ) {
-      return;
-    }
+    setConfirmUnpublish(true);
+  };
+
+  const confirmUnpublishResults = async () => {
+    if (!currentEvent) return;
+    setConfirmUnpublish(false);
     try {
       await api.post(`/api/events/${currentEvent.id}/unpublish-results`);
       showToast('Publication des résultats retirée.');
@@ -585,10 +607,10 @@ export const AdminDashboard: React.FC = () => {
             {/* Header / Event banner */}
             <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs flex flex-wrap items-center justify-between gap-4">
               <div>
-                <span className="text-xs font-extrabold uppercase tracking-wider text-[#0B3B82]">
+                <span className="text-xs font-semibold uppercase tracking-wider text-[#0B3B82]">
                   {currentEvent?.edition || APP_CONFIG.DEFAULT_EVENT_EDITION}
                 </span>
-                <h2 className="text-2xl font-black text-slate-900 mt-1">
+                <h2 className="text-2xl font-bold text-slate-900 mt-1">
                   {currentEvent?.name || "Journée d'Excellence AEERKS"}
                 </h2>
                 <p className="text-xs text-slate-500 mt-1">
@@ -639,7 +661,7 @@ export const AdminDashboard: React.FC = () => {
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
                 <div className="text-xs font-bold text-slate-500 uppercase">Équipes en lice</div>
-                <div className="text-3xl font-black text-[#0B3B82] mt-2">
+                <div className="text-3xl font-bold tabular-nums text-[#0B3B82] mt-2">
                   {teamsList.length}
                 </div>
                 <div className="text-[11px] text-slate-400 mt-1">4 membres par équipe</div>
@@ -647,7 +669,7 @@ export const AdminDashboard: React.FC = () => {
 
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
                 <div className="text-xs font-bold text-slate-500 uppercase">Membres AEERKS</div>
-                <div className="text-3xl font-black text-slate-900 mt-2">
+                <div className="text-3xl font-bold tabular-nums text-slate-900 mt-2">
                   {participantsList.length}
                 </div>
                 <div className="text-[11px] text-slate-400 mt-1">Élèves & étudiants de l'association</div>
@@ -655,7 +677,7 @@ export const AdminDashboard: React.FC = () => {
 
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
                 <div className="text-xs font-bold text-slate-500 uppercase">Banque de Questions</div>
-                <div className="text-3xl font-black text-slate-900 mt-2">
+                <div className="text-3xl font-bold tabular-nums text-slate-900 mt-2">
                   {questionsList.length}
                 </div>
                 <div className="text-[11px] text-slate-400 mt-1">{categoriesList.length} catégories</div>
@@ -663,7 +685,7 @@ export const AdminDashboard: React.FC = () => {
 
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
                 <div className="text-xs font-bold text-slate-500 uppercase">Matchs au programme</div>
-                <div className="text-3xl font-black text-slate-900 mt-2">
+                <div className="text-3xl font-bold tabular-nums text-slate-900 mt-2">
                   {matchesList.length}
                 </div>
                 <div className="text-[11px] text-slate-400 mt-1">Qualification & Finale</div>
@@ -707,7 +729,7 @@ export const AdminDashboard: React.FC = () => {
                   <tbody className="divide-y divide-slate-100">
                     {rankingsList.map((r) => (
                       <tr key={r.teamId} className="hover:bg-slate-50/50">
-                        <td className="py-3.5 px-4 font-black text-[#0B3B82]">
+                        <td className="py-3.5 px-4 font-bold tabular-nums text-[#0B3B82]">
                           #{r.position}
                         </td>
                         <td className="py-3.5 px-4 font-bold text-slate-900">
@@ -716,7 +738,7 @@ export const AdminDashboard: React.FC = () => {
                         <td className="py-3.5 px-4 text-center text-slate-700">{r.matchesPlayed}</td>
                         <td className="py-3.5 px-4 text-center text-emerald-600 font-bold">{r.wins}</td>
                         <td className="py-3.5 px-4 text-center text-slate-700">{r.pointsScored}</td>
-                        <td className="py-3.5 px-4 text-right font-black text-[#0B3B82] text-sm">
+                        <td className="py-3.5 px-4 text-right font-bold tabular-nums text-[#0B3B82] text-sm">
                           {r.totalScore} pts
                         </td>
                       </tr>
@@ -758,7 +780,7 @@ export const AdminDashboard: React.FC = () => {
                     <button
                       id="btn-publish-results-tab"
                       onClick={handlePublishResults}
-                      className="px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-lg flex items-center gap-2 transition-all"
+                      className="px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-lg flex items-center gap-2 transition-all"
                     >
                       <Sparkles className="w-4 h-4" />
                       <span>Publier Officiellement les Résultats</span>
@@ -810,7 +832,7 @@ export const AdminDashboard: React.FC = () => {
                   >
                     <div className="flex items-center justify-between">
                       <span
-                        className={`w-8 h-8 rounded-xl font-black text-sm flex items-center justify-center ${
+                        className={`w-8 h-8 rounded-xl font-bold tabular-nums text-sm flex items-center justify-center ${
                           idx === 0
                             ? 'bg-amber-400 text-slate-900 shadow-xs'
                             : idx === 1
@@ -824,8 +846,8 @@ export const AdminDashboard: React.FC = () => {
                         {idx === 0 ? '1er Prix' : idx === 1 ? '2ème Prix' : '3ème Prix'}
                       </span>
                     </div>
-                    <h5 className="text-lg font-black text-slate-900 mt-3">{r.teamName}</h5>
-                    <div className="mt-3 text-2xl font-black text-[#0B3B82]">
+                    <h5 className="text-lg font-bold text-slate-900 mt-3">{r.teamName}</h5>
+                    <div className="mt-3 text-2xl font-bold tabular-nums text-[#0B3B82]">
                       {r.totalScore} <span className="text-xs font-bold text-slate-400">pts</span>
                     </div>
                   </div>
@@ -865,7 +887,7 @@ export const AdminDashboard: React.FC = () => {
                 >
                   <div>
                     <div className="flex items-center justify-between mb-3">
-                      <span className="text-xs font-extrabold uppercase px-2 py-0.5 rounded-md bg-blue-50 text-[#0B3B82]">
+                      <span className="text-xs font-semibold uppercase px-2 py-0.5 rounded-md bg-blue-50 text-[#0B3B82]">
                         Match #{m.matchNumber}
                       </span>
                       <span
@@ -886,11 +908,11 @@ export const AdminDashboard: React.FC = () => {
                     <div className="space-y-2 my-4">
                       <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50">
                         <span className="text-xs font-bold text-slate-800">{m.teamA?.name}</span>
-                        <span className="text-sm font-black text-[#0B3B82]">{m.scoreA}</span>
+                        <span className="text-sm font-bold tabular-nums text-[#0B3B82]">{m.scoreA}</span>
                       </div>
                       <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50">
                         <span className="text-xs font-bold text-slate-800">{m.teamB?.name}</span>
-                        <span className="text-sm font-black text-[#0B3B82]">{m.scoreB}</span>
+                        <span className="text-sm font-bold tabular-nums text-[#0B3B82]">{m.scoreB}</span>
                       </div>
                     </div>
                   </div>
@@ -949,7 +971,7 @@ export const AdminDashboard: React.FC = () => {
                   className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs"
                 >
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-extrabold uppercase px-2.5 py-1 rounded-md bg-blue-50 text-[#0B3B82]">
+                    <span className="text-xs font-semibold uppercase px-2.5 py-1 rounded-md bg-blue-50 text-[#0B3B82]">
                       {t.code}
                     </span>
                   </div>
@@ -1035,7 +1057,7 @@ export const AdminDashboard: React.FC = () => {
                         {q.difficulty}
                       </span>
                     </div>
-                    <span className="text-xs font-extrabold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                    <span className="text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
                       {q.points} points • {q.timeLimitSeconds}s
                     </span>
                   </div>
@@ -1043,7 +1065,7 @@ export const AdminDashboard: React.FC = () => {
                   <p className="text-sm font-bold text-slate-900 mt-1">{q.text}</p>
 
                   <div className="mt-3 p-3 rounded-xl bg-emerald-50/80 border border-emerald-200 text-xs">
-                    <span className="font-extrabold text-emerald-900">Réponse officielle : </span>
+                    <span className="font-semibold text-emerald-900">Réponse officielle : </span>
                     <span className="text-emerald-900 font-semibold">{q.answer}</span>
                   </div>
                 </div>
@@ -1699,6 +1721,48 @@ export const AdminDashboard: React.FC = () => {
               </button>
             </div>
       </Modal>
+
+      {/* Publication des résultats.
+          Le nombre de matchs et l'indicateur d'état sont rappeles dans le
+          dialogue : c'est ce qui permet de refuser une publication launched trop
+          tôt, au lieu de la découvrir refusée par le serveur (409). */}
+      <ConfirmDialog
+        open={confirmPublish}
+        title="Publier officiellement les résultats ?"
+        message="Le podium d'honneur s'affichera instantanément sur l'écran public. Cet acte engage l'ensemble de la compétition."
+        confirmLabel="Publier au public"
+        onConfirm={() => void confirmPublishResults()}
+        onCancel={() => setConfirmPublish(false)}
+      >
+        {currentEvent && (
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5">
+            <div className="flex items-center justify-between text-[13px]">
+              <span className="font-semibold text-slate-700">Événement</span>
+              <span className="text-slate-900">{currentEvent.name}</span>
+            </div>
+            <div className="mt-1 flex items-center justify-between text-[13px]">
+              <span className="font-semibold text-slate-700">Matchs joués</span>
+              <span className="tabular-nums text-slate-900">{matchesList.length}</span>
+            </div>
+            {unfinishedMatches > 0 && (
+              <p className="mt-1.5 text-[11px] text-amber-700">
+                {unfinishedMatches} match(s) ne sont pas encore clôturés : la publication sera refusée.
+              </p>
+            )}
+          </div>
+        )}
+      </ConfirmDialog>
+
+      {/* Retrait des résultats. Ton non destructif — l'acte est réversible —
+          mais visible du public, d'où la confirmation. */}
+      <ConfirmDialog
+        open={confirmUnpublish}
+        title="Retirer les résultats de l'écran public ?"
+        message="Le podium cessera d'être affiché au public. L'opération reste réversible : vous pourrez republier."
+        confirmLabel="Retirer du public"
+        onConfirm={() => void confirmUnpublishResults()}
+        onCancel={() => setConfirmUnpublish(false)}
+      />
       </div>
     </div>
   );
