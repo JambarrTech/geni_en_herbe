@@ -17,45 +17,30 @@ import {
 const EDITION = APP_CONFIG.DEFAULT_EVENT_EDITION.replace(/^Édition\s+/i, '').trim();
 
 export const LoginPage: React.FC = () => {
-  const { login, loginWithGoogle } = useAuth();
+  const { login } = useAuth();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Quelle action est en cours : le spinner doit être sur le bouton réellement
-  // pressé, pas sur les deux.
-  const [pending, setPending] = useState<'email' | 'google' | null>(null);
+  const [pending, setPending] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (pending) return;
     setError(null);
-    setPending('email');
+    setPending(true);
 
     try {
       await login(email, password);
     } catch (err) {
       setError(errorMessage(err, 'Identifiants incorrects'));
     } finally {
-      setPending(null);
+      setPending(false);
     }
   };
 
-  const handleGoogleLogin = async () => {
-    if (pending) return;
-    setError(null);
-    setPending('google');
-    try {
-      await loginWithGoogle();
-    } catch (err) {
-      setError(errorMessage(err, 'Échec de connexion Google'));
-    } finally {
-      setPending(null);
-    }
-  };
-
-  const busy = pending !== null;
+  const busy = pending;
 
   return (
     <div className="min-h-[calc(100vh-4rem)] relative flex items-center justify-center p-4 sm:p-6 lg:p-10 bg-gradient-to-br from-slate-900 via-[#071E42] to-[#0A2558] overflow-y-auto">
@@ -195,7 +180,7 @@ export const LoginPage: React.FC = () => {
                 disabled={busy}
                 className="w-full mt-2 py-3 px-4 rounded-xl bg-[#0B3B82] hover:bg-[#2563EB] text-white font-semibold text-sm shadow-md shadow-blue-900/10 flex items-center justify-center gap-2 transition-all disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-2"
               >
-                {pending === 'email' ? (
+                {pending ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
                     <span>Vérification en cours...</span>
@@ -209,62 +194,6 @@ export const LoginPage: React.FC = () => {
                 )}
               </button>
             </form>
-
-            <div className="flex items-center gap-3 my-6" aria-hidden="true">
-              <span className="h-px flex-1 bg-slate-200" />
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                ou
-              </span>
-              <span className="h-px flex-1 bg-slate-200" />
-            </div>
-
-            <button
-              id="btn-google-login"
-              type="button"
-              disabled={busy}
-              onClick={handleGoogleLogin}
-              className="w-full py-2.5 px-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium flex items-center justify-center gap-2 transition-colors disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-2"
-            >
-              {pending === 'google' ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-                  <span>Connexion en cours...</span>
-                </>
-              ) : (
-                <>
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" aria-hidden="true">
-                    <path
-                      fill="#4285F4"
-                      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                    />
-                    <path
-                      fill="#34A853"
-                      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                    />
-                    <path
-                      fill="#FBBC05"
-                      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-                    />
-                    <path
-                      fill="#EA4335"
-                      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-                    />
-                  </svg>
-                  <span>Connexion avec Google</span>
-                </>
-              )}
-            </button>
-
-            <div className="text-center mt-6">
-              <a
-                id="btn-return-live"
-                href="/"
-                className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0B3B82] hover:text-[#2563EB] transition-colors rounded px-2 py-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
-              >
-                <ArrowRight className="w-3.5 h-3.5 rotate-180" aria-hidden="true" />
-                Retourner à l'écran Live public
-              </a>
-            </div>
         </div>
 
         <p className="text-center text-xs text-blue-200/60 mt-6">

@@ -1,9 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import type { UserProfile } from '../types.ts';
-import { getFirebaseAuth, getGoogleAuthProvider } from '../lib/firebase.ts';
-// AUCUN import statique de 'firebase/auth' ici : il chargerait le SDK dans le
-// chunk initial. Les fonctions firebase sont importées dynamiquement, au seul
-// moment où elles sont réellement utilisées (connexion Google / déconnexion).
+// Aucun import Firebase : la connexion Google a été retirée de l'interface.
+// Le chemin Firebase reste implémenté côté serveur (voir README § Sécurité).
 import { api, setStoredToken, setUnauthorizedHandler } from '../lib/api.ts';
 
 interface AuthContextType {
@@ -11,7 +9,6 @@ interface AuthContextType {
   token: string | null;
   isLoading: boolean;
   login: (email: string, pass: string) => Promise<UserProfile>;
-  loginWithGoogle: () => Promise<UserProfile>;
   logout: () => void;
   isAdmin: boolean;
   isJury: boolean;
@@ -113,28 +110,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return data.user;
   };
 
-  const loginWithGoogle = async (): Promise<UserProfile> => {
-    // Le SDK Firebase n'est téléchargé qu'ici, au clic.
-    const [auth, provider, { signInWithPopup }] = await Promise.all([
-      getFirebaseAuth(),
-      getGoogleAuthProvider(),
-      import('firebase/auth'),
-    ]);
-
-    const cred = await signInWithPopup(auth, provider);
-    const idToken = await cred.user.getIdToken();
-
-    // Vérifie et récupère le profil côté backend (crée le compte au besoin).
-    const data = await api.get<{ user: UserProfile }>('/api/auth/me', {
-      headers: { Authorization: `Bearer ${idToken}` },
-      token: idToken,
-    });
-    setUser(data.user);
-    setToken(idToken);
-    setStoredToken(idToken);
-    return data.user;
-  };
-
   const logout = () => {
     const currentToken = (() => {
       try {
@@ -151,15 +126,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
     }
     clearLocalSession();
-    // Déconnexion Firebase best-effort, sans forcer le chargement du SDK.
-    void (async () => {
-      try {
-        const { signOut } = await import('firebase/auth');
-        signOut(await getFirebaseAuth()).catch(() => undefined);
-      } catch {
-        /* SDK jamais chargé : rien à déconnecter */
-      }
-    })();
   };
 
   const isAdmin = user?.role === 'ADMIN';
@@ -172,7 +138,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         token,
         isLoading,
         login,
-        loginWithGoogle,
         logout,
         isAdmin,
         isJury,

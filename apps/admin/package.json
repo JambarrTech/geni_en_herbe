@@ -13,7 +13,6 @@
     "lint": "eslint src"
   },
   "dependencies": {
-    "firebase": "^12.19.0",
     "lucide-react": "^0.546.0",
     "react": "^19.0.1",
     "react-dom": "^19.0.1"

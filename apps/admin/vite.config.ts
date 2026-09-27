@@ -37,13 +37,12 @@ export default defineConfig({
     chunkSizeWarningLimit: 700,
     rollupOptions: {
       output: {
-        // Découpage explicite : sans cela Vite emitait un seul chunk de 455 Ko
-        // contenant tout le tableau de bord, la banque de questions avec les
-        // réponses officielles et le SDK Firebase — le tout chargé avant même
-        // que le formulaire de connexion ne soit utilisable.
+        // Découpage explicite : sans cela Vite émettait un seul chunk contenant
+        // tout le tableau de bord, la banque de questions avec les réponses
+        // officielles et les icônes — le tout chargé avant même que le
+        // formulaire de connexion ne soit utilisable.
         manualChunks: {
           react: ['react', 'react-dom'],
-          firebase: ['firebase/app', 'firebase/auth'],
           icons: ['lucide-react'],
         },
       },

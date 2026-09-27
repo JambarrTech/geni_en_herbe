@@ -38,10 +38,9 @@ export default defineConfig({
     rollupOptions: {
       output: {
         // Découpage explicite : l'app jury (419 Ko en un seul chunk) embarquait
-        // React, tout lucide-react et le SDK Firebase dans le payload initial.
+        // React et tout lucide-react dans le payload initial.
         manualChunks: {
           react: ['react', 'react-dom'],
-          firebase: ['firebase/app', 'firebase/auth'],
           icons: ['lucide-react'],
         },
       },

@@ -93,12 +93,16 @@ le code mort échoue à la compilation plutôt que de s'accumuler.
 - **En-têtes** : CSP, `X-Frame-Options`, `nosniff`, `Referrer-Policy`, HSTS en
   production. Derrière un reverse proxy, positionnez `TRUST_PROXY=1` sinon le
   rate-limit de connexion se bucketise sur l'IP du proxy.
-- **Firebase** : `firebase-applet-config.json` est versionné et la clé est inlinée
-  dans les bundles. Une clé web Firebase n'est pas un secret de type clé de service,
-  **mais** elle doit être restreinte par portée d'API dans la console Firebase.
-  Elle est lue seulement au clic sur « Se connecter avec Google » (chargement
-  dynamique). Vous pouvez la remplacer par `VITE_FIREBASE_*` pour cibler un autre
-  projet Firebase par environnement.
+- **Authentification** : la connexion se fait **exclusivement par email + mot de passe**.
+  L'interface n'expose plus de connexion Google, et le SDK `firebase` a été retiré
+  du front (dépendance, chunk de ~235 Ko, `shared/lib/firebase.ts`).
+
+  Le **chemin serveur** reste en place : `backend/src/middleware/auth.ts` sait
+  toujours valider un jeton Firebase ID et provisionner un compte
+  (premier compte ou domaine `CONFIG.ORG_EMAIL_DOMAINS` ⇒ rôle `ADMIN`).
+  Aucun client ne peut plus en produire un, donc ce chemin est inatteignable en
+  l'état — c'est un point à trancher si vous voulez le retirer
+  (voir § Points en suspens).
 
 ## Notes
 
@@ -108,7 +112,7 @@ le code mort échoue à la compilation plutôt que de s'accumuler.
 - Les valeurs métier (chrono, points, bonus, ...) sont centralisées :
   `backend/src/config.ts` (côté serveur) et `shared/lib/config.ts` (côté client).
   Certaines règles restent surchargeables en base via `competition_settings`.
-- Le SDK Firebase et `lucide-react` sont isolés en chunks séparés : ils ne sont pas
-  dans le HTML initial, donc pas dans le chemin critique de rendu.
+- `lucide-react` est isolé dans un chunk séparé, hors du HTML initial, donc hors
+  du chemin critique de rendu.
 - `metadata.json` est un artefact de l'outil qui a généré le projet et ne sert à rien
   en fonctionnement ; il peut être supprimé.
