@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm';
 import { requireAuth, requireAdmin, requireJuryOrAdmin, type AuthRequest } from '../middleware/auth.ts';
 import { logAudit } from '../server/matchEngine.ts';
 import { isForeignKeyViolation, FK_DELETE_MESSAGES } from '../lib/dbErrors.ts';
+import { adminWriteLimit } from '../middleware/rateLimit.ts';
 
 export const participantsRouter = Router();
 
@@ -35,7 +36,7 @@ participantsRouter.get('/', requireAuth, requireJuryOrAdmin, async (_req: AuthRe
   }
 });
 
-participantsRouter.post('/', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+participantsRouter.post('/', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const { firstName, lastName, gender, dateOfBirth, phone, email, photo } = req.body;
     if (!firstName || !lastName) {
@@ -69,7 +70,7 @@ participantsRouter.post('/', requireAuth, requireAdmin, async (req: AuthRequest,
   }
 });
 
-participantsRouter.patch('/:id', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+participantsRouter.patch('/:id', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     const { firstName, lastName, gender, dateOfBirth, phone, email, active } = req.body;
@@ -94,7 +95,7 @@ participantsRouter.patch('/:id', requireAuth, requireAdmin, async (req: AuthRequ
   }
 });
 
-participantsRouter.delete('/:id', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+participantsRouter.delete('/:id', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     await db.delete(participants).where(eq(participants.id, id));

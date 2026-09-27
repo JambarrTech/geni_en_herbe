@@ -20,6 +20,7 @@ import {
 import { publicQuestion } from '../lib/sanitize.ts';
 import { getSetting } from '../lib/settings.ts';
 import { selectQuestionsForMatch } from '../lib/selectQuestions.ts';
+import { scoreLimit, controlLimit, adminWriteLimit } from '../middleware/rateLimit.ts';
 import { CONFIG, FLOW } from '../config.ts';
 
 export const matchesRouter = Router();
@@ -203,7 +204,7 @@ matchesRouter.get('/:id', requireAuth, requireJuryOrAdmin, async (req: AuthReque
   }
 });
 
-matchesRouter.post('/', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+matchesRouter.post('/', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const { eventId, phase, matchNumber, teamAId, teamBId, juryId, questionIds } = req.body;
     if (!teamAId || !teamBId) {
@@ -288,7 +289,7 @@ matchesRouter.post('/', requireAuth, requireAdmin, async (req: AuthRequest, res:
 
 // ---- Match Execution Actions (Jury / Admin) ----
 
-matchesRouter.post('/:id/start', requireAuth, requireJuryOrAdmin, async (req: AuthRequest, res: Response) => {
+matchesRouter.post('/:id/start', requireAuth, requireJuryOrAdmin, controlLimit, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     const [match] = await db.select().from(matches).where(eq(matches.id, id));
@@ -374,7 +375,7 @@ matchesRouter.post('/:id/start', requireAuth, requireJuryOrAdmin, async (req: Au
   }
 });
 
-matchesRouter.post('/:id/pause', requireAuth, requireJuryOrAdmin, async (req: AuthRequest, res: Response) => {
+matchesRouter.post('/:id/pause', requireAuth, requireJuryOrAdmin, controlLimit, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     const [match] = await db.select().from(matches).where(eq(matches.id, id));
@@ -405,7 +406,7 @@ matchesRouter.post('/:id/pause', requireAuth, requireJuryOrAdmin, async (req: Au
   }
 });
 
-matchesRouter.post('/:id/resume', requireAuth, requireJuryOrAdmin, async (req: AuthRequest, res: Response) => {
+matchesRouter.post('/:id/resume', requireAuth, requireJuryOrAdmin, controlLimit, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     const [match] = await db.select().from(matches).where(eq(matches.id, id));
@@ -442,7 +443,7 @@ matchesRouter.post('/:id/resume', requireAuth, requireJuryOrAdmin, async (req: A
 });
 
 // Authoritative Timer Action (start, pause, reset)
-matchesRouter.post('/:id/timer-action', requireAuth, requireJuryOrAdmin, async (req: AuthRequest, res: Response) => {
+matchesRouter.post('/:id/timer-action', requireAuth, requireJuryOrAdmin, controlLimit, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     const { action, seconds } = req.body; // 'start' | 'pause' | 'reset'
@@ -507,7 +508,7 @@ matchesRouter.post('/:id/timer-action', requireAuth, requireJuryOrAdmin, async (
 });
 
 // Next Question
-matchesRouter.post('/:id/next-question', requireAuth, requireJuryOrAdmin, async (req: AuthRequest, res: Response) => {
+matchesRouter.post('/:id/next-question', requireAuth, requireJuryOrAdmin, controlLimit, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     const [match] = await db.select().from(matches).where(eq(matches.id, id));
@@ -576,7 +577,7 @@ matchesRouter.post('/:id/next-question', requireAuth, requireJuryOrAdmin, async 
 });
 
 // Previous Question
-matchesRouter.post('/:id/previous-question', requireAuth, requireJuryOrAdmin, async (req: AuthRequest, res: Response) => {
+matchesRouter.post('/:id/previous-question', requireAuth, requireJuryOrAdmin, controlLimit, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     const [match] = await db.select().from(matches).where(eq(matches.id, id));
@@ -659,7 +660,7 @@ setInterval(
   60_000
 ).unref();
 
-matchesRouter.post('/:id/score', requireAuth, requireJuryOrAdmin, async (req: AuthRequest, res: Response) => {
+matchesRouter.post('/:id/score', requireAuth, requireJuryOrAdmin, scoreLimit, async (req: AuthRequest, res: Response) => {
   try {
     const matchId = parseInt(req.params.id, 10);
     const { teamId, questionId, points, type, reason } = req.body;
@@ -760,6 +761,32 @@ matchesRouter.post('/:id/score', requireAuth, requireJuryOrAdmin, async (req: Au
     // score affiché désynchronisé du journal (piste d'audit) — inacceptable pour
     // un score officiel.
     const result = await db.transaction(async (tx) => {
+      // VERROU de ligne — à ne pas retirer.
+      //
+      // Le recalcul ci-dessous lit le journal pour en déduire le score. Sous
+      // READ COMMITTED, deux transactions concurrentes lisent le MÊME
+      // instantané : chacune voit ses propres écritures et celles déjà
+      // commitées, mais pas celle de l'autre, encore en cours. Elles calculent
+      // donc le même total, et la seconde écrase la première.
+      //
+      // Ce n'est pas théorique : les deux membres du jury qui attribuent des
+      // points à des équipes différentes ont des clés anti-double-clic
+      // DISTINCTES, les deux requêtes passent, et l'entrelacement est
+      // parfaitement réalable à quelques millisecondes d'écart.
+      //
+      // Mesuré sur cette base (backend/test/probe-lost-update-fixed.mjs,
+      // +10 par transaction, deux équipes) :
+      //     sans verrou : total réel 20, score affiché 10  → 10 points perdus
+      //     avec verrou : total réel 20, score affiché 20  → 0 point perdu
+      // Le journal d'audit restait complet dans les deux cas : la perte
+      // n'était visible que sur l'écran, ce qui la rendait indétectable sans
+      // comparaison au journal.
+      await tx
+        .select({ id: matches.id })
+        .from(matches)
+        .where(eq(matches.id, matchId))
+        .for('update');
+
       const [ev] = await tx
         .insert(scoreEvents)
         .values({
@@ -869,7 +896,7 @@ setInterval(
   60_000
 ).unref();
 
-matchesRouter.post('/:id/adjust-score', requireAuth, requireJuryOrAdmin, async (req: AuthRequest, res: Response) => {
+matchesRouter.post('/:id/adjust-score', requireAuth, requireJuryOrAdmin, scoreLimit, async (req: AuthRequest, res: Response) => {
   try {
     const matchId = parseInt(req.params.id, 10);
     const { teamId, points, reason } = req.body;
@@ -974,7 +1001,7 @@ matchesRouter.post('/:id/adjust-score', requireAuth, requireJuryOrAdmin, async (
 });
 
 // Finish Match
-matchesRouter.post('/:id/finish', requireAuth, requireJuryOrAdmin, async (req: AuthRequest, res: Response) => {
+matchesRouter.post('/:id/finish', requireAuth, requireJuryOrAdmin, controlLimit, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     const [match] = await db.select().from(matches).where(eq(matches.id, id));
@@ -1012,7 +1039,7 @@ matchesRouter.post('/:id/finish', requireAuth, requireJuryOrAdmin, async (req: A
   }
 });
 
-matchesRouter.delete('/:id', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+matchesRouter.delete('/:id', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     const [target] = await db.select().from(matches).where(eq(matches.id, id));
@@ -1020,6 +1047,23 @@ matchesRouter.delete('/:id', requireAuth, requireAdmin, async (req: AuthRequest,
     if (target.status === FLOW.MATCH_STATUS.LIVE || target.status === FLOW.MATCH_STATUS.PAUSED) {
       return res.status(400).json({ error: 'Impossible de supprimer un match en cours ou en pause. Terminez-le d\'abord.' });
     }
+
+    // score_events est en ON DELETE CASCADE : supprimer un match effacerait
+    // définitivement son journal de score. Pour une compétition auditée, c'est
+    // inacceptable — on bloque tant qu'il existe des événements.
+    const [existing] = await db
+      .select({ id: scoreEvents.id })
+      .from(scoreEvents)
+      .where(eq(scoreEvents.matchId, id))
+      .limit(1);
+    if (existing) {
+      return res.status(409).json({
+        error:
+          'Impossible de supprimer : ce match possède un historique de score. ' +
+          'Le journal d\'audit doit être conservé. Annulez le match ou contactez l\'administrateur système.',
+      });
+    }
+
     await db.delete(matches).where(eq(matches.id, id));
     await logAudit(req.user?.uid, req.user?.email, 'DELETE_MATCH', 'match', String(id));
     res.json({ success: true });

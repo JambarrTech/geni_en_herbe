@@ -99,6 +99,15 @@ const unsubscribe = subscribe(
   (err) => console.error("Bus d'événements indisponible:", err.message)
 );
 
+// Heartbeat : sans lui, un écran public inactif ne reçoit rien du serveur, et
+// le watchdog client (8 s) ferme et rouvre la connexion en boucle — deux
+// requêtes /api/live et un handshake toutes les ~10 s, par client, pour rien.
+// Un ping toutes les 5 s maintient la connexion sans trafic d'application.
+const heartbeat = setInterval(() => {
+  fanOut('ping', { ts: Date.now() });
+}, 5000);
+heartbeat.unref();
+
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`[AEERKS ws] Diffusion temps réel sur ws://0.0.0.0:${PORT}/ws`);
 });
@@ -106,6 +115,7 @@ server.listen(PORT, '0.0.0.0', () => {
 const shutdown = (signal: string) => {
   console.log(`[AEERKS ws] Arrêt demandé (${signal}).`);
   unsubscribe();
+  clearInterval(heartbeat);
   for (const client of clients) {
     try {
       client.close(1001, 'serveur en arrêt');

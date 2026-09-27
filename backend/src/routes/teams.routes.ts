@@ -7,6 +7,7 @@ import { logAudit } from '../server/matchEngine.ts';
 import { isForeignKeyViolation, FK_DELETE_MESSAGES } from '../lib/dbErrors.ts';
 import { getSetting } from '../lib/settings.ts';
 import { CONFIG, FLOW } from '../config.ts';
+import { adminWriteLimit } from '../middleware/rateLimit.ts';
 
 export const teamsRouter = Router();
 
@@ -71,7 +72,7 @@ teamsRouter.get('/', requireAuth, requireJuryOrAdmin, async (_req: AuthRequest, 
   }
 });
 
-teamsRouter.post('/', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+teamsRouter.post('/', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const { eventId, name, code, logo } = req.body;
     if (!name || !code) return res.status(400).json({ error: 'Nom et code d\'équipe requis' });
@@ -99,7 +100,7 @@ teamsRouter.post('/', requireAuth, requireAdmin, async (req: AuthRequest, res: R
   }
 });
 
-teamsRouter.patch('/:id', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+teamsRouter.patch('/:id', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     const { name, code, status } = req.body;
@@ -128,7 +129,7 @@ teamsRouter.patch('/:id', requireAuth, requireAdmin, async (req: AuthRequest, re
   }
 });
 
-teamsRouter.delete('/:id', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+teamsRouter.delete('/:id', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     await db.delete(teams).where(eq(teams.id, id));
@@ -143,7 +144,7 @@ teamsRouter.delete('/:id', requireAuth, requireAdmin, async (req: AuthRequest, r
   }
 });
 
-teamsRouter.post('/:id/members', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+teamsRouter.post('/:id/members', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const teamId = parseInt(req.params.id, 10);
     const { participantId, role } = req.body;
@@ -208,7 +209,7 @@ teamsRouter.post('/:id/members', requireAuth, requireAdmin, async (req: AuthRequ
   }
 });
 
-teamsRouter.delete('/:id/members/:memberId', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+teamsRouter.delete('/:id/members/:memberId', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const memberId = parseInt(req.params.memberId, 10);
     await db.delete(teamMembers).where(eq(teamMembers.id, memberId));
@@ -220,7 +221,7 @@ teamsRouter.delete('/:id/members/:memberId', requireAuth, requireAdmin, async (r
 });
 
 // Promote to captain: set this member as CAPTAIN, others in same team back to MEMBER
-teamsRouter.post('/:id/members/:memberId/captain', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+teamsRouter.post('/:id/members/:memberId/captain', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const teamId = parseInt(req.params.id, 10);
     const memberId = parseInt(req.params.memberId, 10);

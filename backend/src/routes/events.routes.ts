@@ -12,6 +12,7 @@ import {
 import { isForeignKeyViolation, FK_DELETE_MESSAGES } from '../lib/dbErrors.ts';
 import { FLOW } from '../config.ts';
 import { matches } from '../db/schema.ts';
+import { adminWriteLimit } from '../middleware/rateLimit.ts';
 
 export const eventsRouter = Router();
 
@@ -26,7 +27,7 @@ eventsRouter.get('/', requireAuth, requireJuryOrAdmin, async (_req: AuthRequest,
   }
 });
 
-eventsRouter.post('/', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+eventsRouter.post('/', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const { name, edition, description, startDate, endDate, location } = req.body;
     if (!name || !edition) {
@@ -54,7 +55,7 @@ eventsRouter.post('/', requireAuth, requireAdmin, async (req: AuthRequest, res: 
   }
 });
 
-eventsRouter.patch('/:id', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+eventsRouter.patch('/:id', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     const { name, edition, description, startDate, endDate, location, status } = req.body;
@@ -93,7 +94,7 @@ eventsRouter.patch('/:id', requireAuth, requireAdmin, async (req: AuthRequest, r
 });
 
 // Manual Results Publication
-eventsRouter.post('/:id/publish-results', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+eventsRouter.post('/:id/publish-results', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const eventId = parseInt(req.params.id, 10);
 
@@ -169,7 +170,7 @@ eventsRouter.post('/:id/publish-results', requireAuth, requireAdmin, async (req:
   }
 });
 
-eventsRouter.post('/:id/unpublish-results', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+eventsRouter.post('/:id/unpublish-results', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const eventId = parseInt(req.params.id, 10);
     const [event] = await db
@@ -192,7 +193,7 @@ eventsRouter.post('/:id/unpublish-results', requireAuth, requireAdmin, async (re
   }
 });
 
-eventsRouter.delete('/:id', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+eventsRouter.delete('/:id', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     await db.delete(events).where(eq(events.id, id));

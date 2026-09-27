@@ -6,6 +6,7 @@ import { eq } from 'drizzle-orm';
 import { registerSessionToken, revokeSessionToken, requireAuth, type AuthRequest } from '../middleware/auth.ts';
 import { logAudit } from '../server/matchEngine.ts';
 import { verifyPassword } from '../lib/password.ts';
+import { loginIpFailures } from '../middleware/rateLimit.ts';
 import { CONFIG } from '../config.ts';
 
 export const authRouter = Router();
@@ -70,6 +71,19 @@ authRouter.post('/login', async (req: Request, res: Response) => {
       });
     }
 
+    // Frein complementary, par adresse IP. La cle email+IP ci-dessus se
+    // contourne en variant l'email (bourrage d'identifiants) ; celle-ci compte
+    // les ECHECS uniquement, pour ne pas penaliser une salle entiere derriere
+    // un meme NAT dont les connexions reussies sont legitimes.
+    const ipKey = `login-ip:${ip}`;
+    if (loginIpFailures.isBlocked(ipKey)) {
+      const seconds = loginIpFailures.retryAfter(ipKey);
+      res.setHeader('Retry-After', String(seconds));
+      return res.status(429).json({
+        error: `Trop de tentatives infructueuses depuis ce poste. Réessayez dans ${Math.ceil(seconds / 60)} minute(s).`,
+      });
+    }
+
     // Find user in database
     const [user] = await db
       .select()
@@ -78,6 +92,7 @@ authRouter.post('/login', async (req: Request, res: Response) => {
 
     if (!user || !user.passwordHash || !verifyPassword(password, user.passwordHash)) {
       registerFailure(key);
+      loginIpFailures.penalize(ipKey);
       return res.status(401).json({ error: 'Identifiants invalides' });
     }
 
@@ -86,6 +101,7 @@ authRouter.post('/login', async (req: Request, res: Response) => {
     }
 
     resetAttempts(key);
+    loginIpFailures.reset(ipKey);
 
     // Generate session token (cryptographiquement aléatoire)
     const token = `${CONFIG.TOKEN_PREFIX}${randomBytes(32).toString('base64url')}`;

@@ -4,6 +4,7 @@ import { auditLogs, competitionSettings } from '../db/schema.ts';
 import { desc } from 'drizzle-orm';
 import { requireAuth, requireAdmin, requireJuryOrAdmin, type AuthRequest } from '../middleware/auth.ts';
 import { logAudit } from '../server/matchEngine.ts';
+import { adminWriteLimit } from '../middleware/rateLimit.ts';
 
 export const adminRouter = Router();
 
@@ -30,7 +31,7 @@ adminRouter.get('/api/settings', requireAuth, requireJuryOrAdmin, async (_req: A
   }
 });
 
-adminRouter.patch('/api/settings', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+adminRouter.patch('/api/settings', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const { settings } = req.body; // Array of { key, value }
     if (!Array.isArray(settings)) {

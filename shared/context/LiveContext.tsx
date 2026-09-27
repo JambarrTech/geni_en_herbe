@@ -139,10 +139,27 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
             message.type === 'results_unpublished'
           ) {
             if (message.data?.liveState) {
-              setLiveState(message.data.liveState);
-              if (message.data.liveState.activeMatch) {
-                setTimerLeft(message.data.liveState.activeMatch.timerSecondsLeft);
-                setTimerRunning(message.data.liveState.activeMatch.timerIsRunning);
+              const incoming = message.data.liveState;
+              // Fusion plutôt que remplacement : les diffusions qui ne portent
+              // pas de classement (score_updated, question_changed…) ne doivent
+              // PAS effacer le podium. En remplaçant le state entier, chaque
+              // point attribué vidait le classement de l'écran public.
+              setLiveState((prev) => {
+                if (!prev) return incoming;
+                return {
+                  ...incoming,
+                  // Conserve le classement précédent si la diffusion n'en apporte
+                  // pas (tableau vide = absence, pas "pas de classement").
+                  rankings:
+                    incoming.rankings.length > 0 ? incoming.rankings : prev.rankings,
+                };
+              });
+              if (incoming.activeMatch) {
+                setTimerLeft(incoming.activeMatch.timerSecondsLeft);
+                setTimerRunning(incoming.activeMatch.timerIsRunning);
+              } else if (incoming.event === null) {
+                // Aucun match actif : le chrono est à l'arrêt.
+                setTimerRunning(false);
               }
             } else {
               // Full refresh

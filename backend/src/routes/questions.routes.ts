@@ -5,6 +5,7 @@ import { eq, desc } from 'drizzle-orm';
 import { requireAuth, requireAdmin, type AuthRequest } from '../middleware/auth.ts';
 import { logAudit } from '../server/matchEngine.ts';
 import { CONFIG, FLOW } from '../config.ts';
+import { adminWriteLimit } from '../middleware/rateLimit.ts';
 
 export const questionsRouter = Router();
 
@@ -132,7 +133,7 @@ questionsRouter.get('/', requireAuth, requireAdmin, async (_req: AuthRequest, re
   }
 });
 
-questionsRouter.post('/', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+questionsRouter.post('/', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     // `type`, `difficulty`, `points`, `timeLimitSeconds` et `options` sont relus
     // depuis req.body après validateQuestionPayload(), qui les normalise et les
@@ -172,7 +173,7 @@ questionsRouter.post('/', requireAuth, requireAdmin, async (req: AuthRequest, re
   }
 });
 
-questionsRouter.patch('/:id', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+questionsRouter.patch('/:id', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     const { categoryId, text, answer, explanation, active } = req.body;
@@ -218,7 +219,7 @@ questionsRouter.patch('/:id', requireAuth, requireAdmin, async (req: AuthRequest
   }
 });
 
-questionsRouter.delete('/:id', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+questionsRouter.delete('/:id', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     const [target] = await db

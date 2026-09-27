@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm';
 import { requireAuth, requireAdmin, requireJuryOrAdmin, type AuthRequest } from '../middleware/auth.ts';
 import { logAudit } from '../server/matchEngine.ts';
 import { isForeignKeyViolation, FK_DELETE_MESSAGES } from '../lib/dbErrors.ts';
+import { adminWriteLimit } from '../middleware/rateLimit.ts';
 
 export const categoriesRouter = Router();
 
@@ -17,7 +18,7 @@ categoriesRouter.get('/', requireAuth, requireJuryOrAdmin, async (_req: AuthRequ
   }
 });
 
-categoriesRouter.post('/', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+categoriesRouter.post('/', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const { name, description } = req.body;
     if (!name) return res.status(400).json({ error: 'Nom de catégorie requis' });
@@ -33,7 +34,7 @@ categoriesRouter.post('/', requireAuth, requireAdmin, async (req: AuthRequest, r
   }
 });
 
-categoriesRouter.patch('/:id', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+categoriesRouter.patch('/:id', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     const { name, description, active } = req.body;
@@ -54,7 +55,7 @@ categoriesRouter.patch('/:id', requireAuth, requireAdmin, async (req: AuthReques
   }
 });
 
-categoriesRouter.delete('/:id', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+categoriesRouter.delete('/:id', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     await db.delete(categories).where(eq(categories.id, id));

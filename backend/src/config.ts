@@ -63,6 +63,29 @@ export const CONFIG = {
   // livraison n'a lieu qu'au commit de la transaction émettrice.
   PUBSUB_CHANNEL: 'aeerks_events',
   PUBSUB_RECONNECT_MS: 3000,
+  // Intervalle du heartbeat WebSocket. Sans lui, un écran public inactif ne
+  // reçoit rien du serveur et le watchdog client (8 s) boucle en reconnexion.
+  WS_HEARTBEAT_MS: 5000,
+
+  // --- Limitation de débit ---
+  // La protection anti-double-clic du client n'est pas une sécurité : il suffit
+  // de ne pas utiliser le client, ou d'en ouvrir plusieurs en parallèle. Ces
+  // quotas protègent le journal de score et l'état du chrono.
+  //
+  // Volontairement larges pour ne jamais gêner un usage humain : un membre du
+  // jury qui attribue des points en continu reste très en dessous, tandis
+  // qu'un script de flood sature immediatement.
+  RATE_LIMIT: {
+    // Attribution et ajustement de score : l'opération la plus sensible.
+    SCORE: { limit: 30, windowMs: 10_000 },
+    // Pilotage du chrono et de la progression : actions délibérées, peu fréquentes.
+    MATCH_CONTROL: { limit: 20, windowMs: 10_000 },
+    // Création / modification / suppression côté comité.
+    ADMIN_WRITE: { limit: 30, windowMs: 10_000 },
+    // Connexion : serré, et par couple email + IP (et non par IP seule, sinon
+    // toute la salle de compétition se bloque mutuellement).
+    LOGIN: { limit: 5, windowMs: 15 * 60_000 },
+  },
 
   // --- WebSocket ---
   WS_CLOSE_INVALID_AUTH: 1008,

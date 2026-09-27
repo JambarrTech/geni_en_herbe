@@ -2,10 +2,11 @@ import { Router, type Response } from 'express';
 import { randomUUID } from 'crypto';
 import { db } from '../db/index.ts';
 import { users } from '../db/schema.ts';
-import { eq, desc } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import { requireAuth, requireAdmin, revokeAllSessionsForUser, type AuthRequest } from '../middleware/auth.ts';
 import { logAudit } from '../server/matchEngine.ts';
 import { hashPassword } from '../lib/password.ts';
+import { adminWriteLimit } from '../middleware/rateLimit.ts';
 
 export const usersRouter = Router();
 
@@ -27,7 +28,7 @@ async function countActiveAdmins(): Promise<number> {
   const rows = await db
     .select({ id: users.id })
     .from(users)
-    .where(eq(users.role, 'ADMIN'));
+    .where(and(eq(users.role, 'ADMIN'), eq(users.active, true)));
   return rows.length;
 }
 
@@ -44,7 +45,7 @@ usersRouter.get('/', requireAuth, requireAdmin, async (_req: AuthRequest, res: R
   }
 });
 
-usersRouter.post('/', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+usersRouter.post('/', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const { name, email, password, role } = req.body;
 
@@ -102,7 +103,7 @@ usersRouter.post('/', requireAuth, requireAdmin, async (req: AuthRequest, res: R
   }
 });
 
-usersRouter.patch('/:id', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+usersRouter.patch('/:id', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     const { role, active } = req.body;
@@ -167,7 +168,7 @@ usersRouter.patch('/:id', requireAuth, requireAdmin, async (req: AuthRequest, re
   }
 });
 
-usersRouter.post('/:id/password', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+usersRouter.post('/:id/password', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     const { password } = req.body;
@@ -199,7 +200,7 @@ usersRouter.post('/:id/password', requireAuth, requireAdmin, async (req: AuthReq
   }
 });
 
-usersRouter.delete('/:id', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+usersRouter.delete('/:id', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     const [target] = await db.select(USER_PUBLIC_COLUMNS).from(users).where(eq(users.id, id));
