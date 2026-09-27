@@ -4,7 +4,8 @@ import { platform } from 'node:process';
 const cwd = process.cwd();
 
 // Port unique du backend : surchargeable via BACKEND_PORT (ou PORT).
-const BACKEND_PORT = process.env.BACKEND_PORT || process.env.PORT || '3000';
+// 4000 doit rester aligné sur CONFIG.PORT_DEFAULT (backend/src/config.ts).
+const BACKEND_PORT = process.env.BACKEND_PORT || process.env.PORT || '4000';
 const BACKEND_URL = process.env.BACKEND_URL || `http://localhost:${BACKEND_PORT}`;
 
 // Sur Windows, npm est un fichier .cmd

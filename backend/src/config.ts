@@ -42,7 +42,10 @@ export const CONFIG = {
   DB_POOL_MAX: 10,
 
   // --- Serveur HTTP ---
-  PORT_DEFAULT: 3000,
+  // Port par défaut du backend. Surchargeable par la variable d'environnement
+  // PORT (cf. backend/src/index.ts). Doit rester aligné sur la valeur par
+  // défaut des trois vite.config.ts et de scripts/dev.mjs.
+  PORT_DEFAULT: 4000,
   JSON_BODY_LIMIT: '1mb',
   // TTL de cache des assets versionnés par hash (immuables)
   STATIC_IMMUTABLE_MAX_AGE_MS: 365 * 24 * 60 * 60 * 1000, // 1 an

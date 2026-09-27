@@ -33,10 +33,14 @@ qui partagent du code commun dans `shared/` (alias `@shared` dans chaque app).
    npm run dev
    ```
 
-   - API : http://localhost:3000
+   - API : http://localhost:4000
    - Live : http://localhost:5173  Jury : http://localhost:5174  Admin : http://localhost:5175
 
-   En dev, chaque app Vite proxie `/api` et `/ws` vers le backend (port 3000).
+   En dev, chaque app Vite proxie `/api` et `/ws` vers le backend (port 4000).
+   Le port du backend se surcharge par `PORT` (ou `BACKEND_PORT` pour `npm run dev`) ;
+   en modifier la valeur par défaut demande de mettre à jour **ensemble**
+   `backend/src/config.ts` (`PORT_DEFAULT`), `scripts/dev.mjs` et les trois
+   `apps/*/vite.config.ts`, sinon le proxy et le backend ne se retrouvent plus.
 
 3. Build de production (les trois apps vers `apps/*/dist`) :
 

@@ -3,7 +3,8 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath } from 'url';
 
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3000';
+// Doit rester aligné sur CONFIG.PORT_DEFAULT (backend/src/config.ts).
+const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:4000';
 
 export default defineConfig({
   // En production le backend sert les apps sous des chemins dédiés :
