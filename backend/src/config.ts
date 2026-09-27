@@ -67,6 +67,11 @@ export const CONFIG = {
   // reçoit rien du serveur et le watchdog client (8 s) boucle en reconnexion.
   WS_HEARTBEAT_MS: 5000,
 
+  // Delai avant qu'un worker qui n'a pas obtenu le verrou de leader retente.
+  // Volontairement long : ce cas n'occurre que si un second worker tourne, et
+  // chaque tentative échouee est une requete inutile en base.
+  LEADER_RETRY_MS: 10_000,
+
   // --- Limitation de débit ---
   // La protection anti-double-clic du client n'est pas une sécurité : il suffit
   // de ne pas utiliser le client, ou d'en ouvrir plusieurs en parallèle. Ces
