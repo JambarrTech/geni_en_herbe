@@ -13,10 +13,12 @@ import {
   XCircle,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   AlertTriangle,
   Award,
   Sliders,
   RefreshCw,
+  Keyboard,
 } from 'lucide-react';
 
 /** Détail complet d'un match tel que renvoyé par GET /api/matches/:id (jury). */
@@ -277,23 +279,23 @@ export const JuryDashboard: React.FC = () => {
     });
   };
 
-  const handleNextQuestion = () => {
+  const handleNextQuestion = useCallback(() => {
     if (selectedMatchId == null) return;
     void runAction('Question suivante', async () => {
       await api.post(`/api/matches/${selectedMatchId}/next-question`);
       showFeedback('Question suivante chargée');
       await loadMatchDetails(selectedMatchId);
     });
-  };
+  }, [selectedMatchId, runAction, showFeedback, loadMatchDetails]);
 
-  const handlePrevQuestion = () => {
+  const handlePrevQuestion = useCallback(() => {
     if (selectedMatchId == null) return;
     void runAction('Question précédente', async () => {
       await api.post(`/api/matches/${selectedMatchId}/previous-question`);
       showFeedback('Question précédente');
       await loadMatchDetails(selectedMatchId);
     });
-  };
+  }, [selectedMatchId, runAction, showFeedback, loadMatchDetails]);
 
   /**
    * Attribution de points.
@@ -301,9 +303,9 @@ export const JuryDashboard: React.FC = () => {
    * L'identifiant de match provient désormais de `matchDetails` — la MÊME
    * source que le `questionId` envoyé. Auparavant l'URL portait
    * `selectedMatchId` et le corps `matchDetails.currentQuestion.id` : après un
-   * changement de match, les deux pouvait désigner des matchs différents.
+   * changement de match, les deux pouvaient désigner des matchs différents.
    */
-  const handleScore = (
+  const handleScore = useCallback((
     teamId: number,
     pts: number,
     type: 'ANSWER' | 'BONUS' | 'PENALTY',
@@ -330,7 +332,7 @@ export const JuryDashboard: React.FC = () => {
       await loadMatchDetails(matchId);
       void refreshLiveState();
     });
-  };
+  }, [matchDetails, actionLoading, runAction, showFeedback, playTone, loadMatchDetails, refreshLiveState]);
 
   const handleAdjustSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -400,8 +402,95 @@ export const JuryDashboard: React.FC = () => {
     setAdjustReason('');
   };
 
+  /**
+   * Raccourcis clavier.
+   *
+   * Attribuer un point est l'action la plus répétée de toute la plateforme, et
+   * elle reposait uniquement sur le clic. Un membre du jury qui doit valider
+   * plusieurs réponses d'affilée perd du temps à viser des boutons, et reste
+   * bloqué s'il manie mal la souris sous pression. D'où les raccourcis, qui ne
+   * s'activent que si le focus n'est pas dans un champ de saisie.
+   */
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      // Ne jamais capter une frappe destinée à un champ de saisie.
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (!matchDetails) return;
+
+      const A = matchDetails.teamAId;
+      const B = matchDetails.teamBId;
+      const pts = currentQ?.points || APP_CONFIG.DEFAULT_QUESTION_POINTS;
+
+      switch (e.key) {
+        case 'a':
+        case 'A':
+          if (canScore) handleScore(A, pts, 'ANSWER', `Bonne réponse directe (${pts} pts)`);
+          break;
+        case 'e':
+        case 'E':
+          if (canScore) handleScore(B, pts, 'ANSWER', `Bonne réponse directe (${pts} pts)`);
+          break;
+        case '1':
+          if (canScore) {
+            handleScore(A, APP_CONFIG.BONUS_POINTS, 'BONUS', `Points Bonus (+${APP_CONFIG.BONUS_POINTS} pts)`);
+          }
+          break;
+        case '2':
+          if (canScore) {
+            handleScore(B, APP_CONFIG.BONUS_POINTS, 'BONUS', `Points Bonus (+${APP_CONFIG.BONUS_POINTS} pts)`);
+          }
+          break;
+        case 'z':
+        case 'Z':
+          if (canScore) handleScore(A, 0, 'PENALTY', 'Réponse erronée (0 pt)');
+          break;
+        case 's':
+        case 'S':
+          if (canScore) handleScore(B, 0, 'PENALTY', 'Réponse erronée (0 pt)');
+          break;
+        case 'ArrowRight':
+          if (currentIdx < matchQuestionsList.length - 1 && !actionLoading) {
+            e.preventDefault();
+            handleNextQuestion();
+          }
+          break;
+        case 'ArrowLeft':
+          if (currentIdx > 0 && !actionLoading) {
+            e.preventDefault();
+            handlePrevQuestion();
+          }
+          break;
+        default:
+          return;
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [
+    matchDetails,
+    canScore,
+    actionLoading,
+    currentIdx,
+    matchQuestionsList.length,
+    currentQ,
+    handleScore,
+    handleNextQuestion,
+    handlePrevQuestion,
+  ]);
+
   return (
-    <div className="min-h-[calc(100vh-4rem)] bg-slate-100/70 p-4 sm:p-6 lg:p-8">
+    <main id="contenu-principal" className="min-h-[calc(100vh-4rem)] bg-slate-100/70 p-4 sm:p-6 lg:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Top Control Bar: Match Selector & Quick Status */}
         <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-4">
@@ -525,6 +614,8 @@ export const JuryDashboard: React.FC = () => {
                     id="btn-jury-valider-team-a"
                     type="button"
                     disabled={!canScore}
+                    aria-keyshortcuts="A"
+                    title={canScore ? 'Valider la bonne réponse (raccourci : A)' : undefined}
                     onClick={() =>
                       handleScore(
                         matchDetails.teamAId,
@@ -750,6 +841,8 @@ export const JuryDashboard: React.FC = () => {
                     id="btn-jury-valider-team-b"
                     type="button"
                     disabled={!canScore}
+                    aria-keyshortcuts="E"
+                    title={canScore ? 'Valider la bonne réponse (raccourci : E)' : undefined}
                     onClick={() =>
                       handleScore(
                         matchDetails.teamBId,
@@ -812,6 +905,37 @@ export const JuryDashboard: React.FC = () => {
               </p>
             )}
 
+            {/* Aide aux raccourcis : sans rappel visuel, personne ne les trouve. */}
+            <details className="bg-white rounded-xl border border-slate-200 text-xs">
+              <summary className="cursor-pointer select-none px-4 py-2.5 font-semibold text-slate-600 hover:text-slate-900 list-none flex items-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#2563EB] rounded-xl">
+                <Keyboard className="w-3.5 h-3.5 text-[#0B3B82]" aria-hidden="true" />
+                Raccourcis clavier
+                <ChevronDown
+                  className="w-3.5 h-3.5 ml-auto text-slate-400"
+                  aria-hidden="true"
+                />
+              </summary>
+              <div className="px-4 pb-3.5 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 text-slate-600">
+                {[
+                  ['A', 'Bonne réponse — Équipe A'],
+                  ['E', 'Bonne réponse — Équipe B'],
+                  ['1', 'Points bonus — Équipe A'],
+                  ['2', 'Points bonus — Équipe B'],
+                  ['Z', 'Réponse fausse — Équipe A (0 pt)'],
+                  ['S', 'Réponse fausse — Équipe B (0 pt)'],
+                  ['←', 'Question précédente'],
+                  ['→', 'Question suivante'],
+                ].map(([key, label]) => (
+                  <div key={key} className="flex items-center gap-2.5">
+                    <kbd className="shrink-0 min-w-[1.6rem] text-center px-1.5 py-0.5 rounded-md border border-slate-300 bg-slate-50 font-mono text-[11px] font-bold text-slate-700">
+                      {key}
+                    </kbd>
+                    <span>{label}</span>
+                  </div>
+                ))}
+              </div>
+            </details>
+
             {/* Current Question & Official Answer Display (Jury Only) */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
               <div className="bg-slate-50/80 px-6 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
@@ -839,7 +963,9 @@ export const JuryDashboard: React.FC = () => {
                     type="button"
                     onClick={handlePrevQuestion}
                     disabled={currentIdx <= 0 || actionLoading}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-30"
+                    aria-keyshortcuts="ArrowLeft"
+                    title="Question précédente (raccourci : ←)"
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-30 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
                   >
                     <ChevronLeft className="w-4 h-4" aria-hidden="true" />
                     <span>Précédente</span>
@@ -850,7 +976,9 @@ export const JuryDashboard: React.FC = () => {
                     type="button"
                     onClick={handleNextQuestion}
                     disabled={currentIdx >= matchQuestionsList.length - 1 || actionLoading}
-                    className="flex items-center gap-1 px-3.5 py-1.5 rounded-xl bg-[#0B3B82] hover:bg-[#2563EB] text-white text-xs font-semibold shadow-xs disabled:opacity-30"
+                    aria-keyshortcuts="ArrowRight"
+                    title="Question suivante (raccourci : →)"
+                    className="flex items-center gap-1 px-3.5 py-1.5 rounded-xl bg-[#0B3B82] hover:bg-[#2563EB] text-white text-xs font-semibold shadow-xs disabled:opacity-30 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-1"
                   >
                     <span>Suivante</span>
                     <ChevronRight className="w-4 h-4" aria-hidden="true" />
@@ -1121,6 +1249,6 @@ export const JuryDashboard: React.FC = () => {
           </>
         )}
       </Modal>
-    </div>
+    </main>
   );
 };

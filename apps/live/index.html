@@ -1,12 +1,32 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="fr">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#071E42" />
     <title>AEERKS — Écran Public Live</title>
+    <meta
+      name="description"
+      content="Diffusion en direct de la Journée d'Excellence — Génie en Herbe, AEERKS, Keur Salla Mbatta."
+    />
+    <!-- L'écran public est destiné à un vidéoprojecteur : on évite que
+         le navigateur applique un zoom automatique sur les écrans tactiles. -->
+    <meta name="format-detection" content="telephone=no" />
+
+    <link rel="icon" type="image/png" sizes="32x32" href="../../shared/assets/aeerks-logo-32.png" />
+    <link rel="icon" type="image/png" sizes="64x64" href="../../shared/assets/aeerks-logo-64.png" />
+    <link rel="apple-touch-icon" href="../../shared/assets/aeerks-logo-180.png" />
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <div style="font-family: system-ui, sans-serif; padding: 2rem; text-align: center; color: #0f172a">
+        <h1 style="font-size: 1.25rem">JavaScript est requis</h1>
+        <p style="font-size: 0.875rem; margin-top: 0.5rem">
+          L'écran public de la AEERKS nécessite JavaScript pour recevoir les scores en direct.
+        </p>
+      </div>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

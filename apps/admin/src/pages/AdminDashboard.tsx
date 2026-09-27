@@ -43,6 +43,30 @@ type AdminTab =
   | 'audit'
   | 'users';
 
+interface AdminTabDef {
+  id: AdminTab;
+  label: string;
+  Icon: React.ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>;
+  /** Pastille indicative. */
+  badge?: 'count' | 'published';
+}
+
+/**
+ * Barème de navigation. Le rendu est isolé dans le composant : auparavant les
+ * 8 boutons étaient écrits en dur dans le JSX, chacun dupliquant ses classes
+ * de style actif, ce qui rendait toute evolution visuelle_fastidieuse.
+ */
+const TAB_DEFS: AdminTabDef[] = [
+  { id: 'overview', label: 'Aperçu & Pilotage', Icon: LayoutDashboard },
+  { id: 'results', label: 'Résultats Officiels', Icon: Trophy, badge: 'published' },
+  { id: 'matches', label: 'Matchs & Calendrier', Icon: Play, badge: 'count' },
+  { id: 'teams', label: 'Équipes & Membres', Icon: Users, badge: 'count' },
+  { id: 'questions', label: 'Banque de Questions', Icon: HelpCircle, badge: 'count' },
+  { id: 'participants', label: 'Membres AEERKS', Icon: GraduationCap, badge: 'count' },
+  { id: 'audit', label: "Journal d'Audit & Règles", Icon: ClipboardList },
+  { id: 'users', label: 'Comptes & Membres du Jury', Icon: UserPlus },
+];
+
 export const AdminDashboard: React.FC = () => {
   // Le jeton est lu par le client HTTP (shared/lib/api.ts) : inutile ici.
   const { refreshLiveState } = useLive();
@@ -418,9 +442,14 @@ export const AdminDashboard: React.FC = () => {
 
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-slate-50 flex flex-col md:flex-row md:h-[calc(100vh-4rem)] md:overflow-hidden">
-      {/* Sidebar Navigation */}
-      <aside className="w-full md:w-64 bg-white border-r border-slate-200 p-4 shrink-0">
-        <div className="mb-6 px-2">
+      {/*
+        Navigation. Sur mobile elle occupait un bloc de 8 boutons pleine
+        largeur qui repoussait le contenu hors de l'écran : la première vue
+        d'un téléphone était uniquement de la navigation. Elle devient un
+        bandeau horizontal défilant sous 768 px, et une colonne ensuite.
+      */}
+      <aside className="w-full md:w-64 bg-white border-b md:border-b-0 md:border-r border-slate-200 p-3 md:p-4 shrink-0">
+        <div className="mb-3 md:mb-6 px-2">
           <div className="text-[10px] font-bold uppercase tracking-wider text-[#0B3B82]">
             Comité d'Organisation
           </div>
@@ -429,152 +458,73 @@ export const AdminDashboard: React.FC = () => {
           </h2>
         </div>
 
-        <nav className="space-y-1">
-          <button
-            id="tab-overview"
-            onClick={() => setCurrentTab('overview')}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-              currentTab === 'overview'
-                ? 'bg-[#0B3B82] text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-          >
-            <LayoutDashboard className="w-4 h-4" />
-            <span>Aperçu & Pilotage</span>
-          </button>
-
-          <button
-            id="tab-results"
-            onClick={() => setCurrentTab('results')}
-            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-              currentTab === 'results'
-                ? 'bg-[#0B3B82] text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-          >
-            <div className="flex items-center gap-3">
-              <Trophy className="w-4 h-4 text-amber-500" />
-              <span>Résultats Officiels</span>
-            </div>
-            {currentEvent?.resultsPublished && (
-              <span className="w-2 h-2 rounded-full bg-emerald-400" />
-            )}
-          </button>
-
-          <button
-            id="tab-matches"
-            onClick={() => setCurrentTab('matches')}
-            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-              currentTab === 'matches'
-                ? 'bg-[#0B3B82] text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-          >
-            <div className="flex items-center gap-3">
-              <Play className="w-4 h-4 text-emerald-600" />
-              <span>Matchs & Calendrier</span>
-            </div>
-            <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-700">
-              {matchesList.length}
-            </span>
-          </button>
-
-          <button
-            id="tab-teams"
-            onClick={() => setCurrentTab('teams')}
-            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-              currentTab === 'teams'
-                ? 'bg-[#0B3B82] text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-          >
-            <div className="flex items-center gap-3">
-              <Users className="w-4 h-4 text-blue-600" />
-              <span>Équipes & Membres</span>
-            </div>
-            <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-700">
-              {teamsList.length}
-            </span>
-          </button>
-
-          <button
-            id="tab-questions"
-            onClick={() => setCurrentTab('questions')}
-            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-              currentTab === 'questions'
-                ? 'bg-[#0B3B82] text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-          >
-            <div className="flex items-center gap-3">
-              <HelpCircle className="w-4 h-4 text-violet-600" />
-              <span>Banque de Questions</span>
-            </div>
-            <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-700">
-              {questionsList.length}
-            </span>
-          </button>
-
-          <button
-            id="tab-participants"
-            onClick={() => setCurrentTab('participants')}
-            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-              currentTab === 'participants'
-                ? 'bg-[#0B3B82] text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-          >
-            <div className="flex items-center gap-3">
-              <GraduationCap className="w-4 h-4 text-emerald-600" />
-              <span>Membres AEERKS</span>
-            </div>
-            <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-700">
-              {participantsList.length}
-            </span>
-          </button>
-
-          <button
-            id="tab-audit"
-            onClick={() => setCurrentTab('audit')}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-              currentTab === 'audit'
-                ? 'bg-[#0B3B82] text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-          >
-            <ClipboardList className="w-4 h-4 text-slate-500" />
-            <span>Journal d'Audit & Règles</span>
-          </button>
-
-          <button
-            id="tab-users"
-            onClick={() => setCurrentTab('users')}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-              currentTab === 'users'
-                ? 'bg-[#0B3B82] text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-          >
-            <UserPlus className="w-4 h-4 text-slate-500" />
-            <span>Comptes & Membres du Jury</span>
-          </button>
+        <nav
+          aria-label="Sections de l'administration"
+          className="flex md:block gap-1 md:space-y-1 overflow-x-auto md:overflow-visible pb-1 md:pb-0 -mx-1 px-1 md:mx-0 md:px-0"
+        >
+          {TAB_DEFS.map(({ id, label, Icon, badge }) => {
+            const isActive = currentTab === id;
+            // Compteurs vivants, précédemment écrits en dur dans chaque bouton.
+            const count =
+              badge === 'count'
+                ? ({
+                    matches: matchesList.length,
+                    teams: teamsList.length,
+                    questions: questionsList.length,
+                    participants: participantsList.length,
+                  }[id as 'matches'] ?? 0)
+                : null;
+            return (
+              <button
+                key={id}
+                id={`tab-${id}`}
+                type="button"
+                onClick={() => setCurrentTab(id)}
+                aria-current={isActive ? 'page' : undefined}
+                className={`w-full shrink-0 flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-1 ${
+                  isActive
+                    ? 'bg-[#0B3B82] text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                }`}
+              >
+                <Icon className="w-4 h-4 shrink-0" aria-hidden="true" />
+                <span>{label}</span>
+                {count != null && (
+                  <span
+                    className={`ml-auto text-[10px] px-1.5 py-0.5 rounded-md ${
+                      isActive ? 'bg-white/15 text-white' : 'bg-slate-100 text-slate-700'
+                    }`}
+                  >
+                    {count}
+                  </span>
+                )}
+                {badge === 'published' && currentEvent?.resultsPublished && (
+                  <span
+                    className="ml-auto w-2 h-2 rounded-full bg-emerald-400 shrink-0"
+                    aria-label="résultats publiés"
+                  />
+                )}
+              </button>
+            );
+          })}
         </nav>
 
-        {/* Quick Link to Jury Table */}
-        <div className="mt-8 pt-6 border-t border-slate-200">
+        {/* Accès rapide à la table d'arbitrage */}
+        <div className="hidden md:block mt-8 pt-6 border-t border-slate-200">
           <a
             id="btn-goto-jury-from-admin"
             href="/jury"
-            className="w-full py-2.5 px-3 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 text-xs font-bold flex items-center justify-center gap-2 transition-colors"
+            className="w-full py-2.5 px-3 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 text-xs font-bold flex items-center justify-center gap-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
           >
-            <Trophy className="w-4 h-4 text-amber-600" />
+            <Trophy className="w-4 h-4 text-amber-600" aria-hidden="true" />
             <span>Ouvrir la Table du Jury</span>
           </a>
         </div>
       </aside>
 
-      {/* Main Panel Content */}
-      <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto">
+      {/* Contenu */}
+      <div className="flex-1 flex flex-col min-h-0">
+      <main id="contenu-principal" className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto">
         {/* Indicateur de chargement : `loading` était alimenté par fetchData
             mais jamais consommé — l'écran restait vide sans feedback. */}
         <div
@@ -1749,6 +1699,7 @@ export const AdminDashboard: React.FC = () => {
               </button>
             </div>
       </Modal>
+      </div>
     </div>
   );
 };

@@ -1,21 +1,58 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useLive } from '@shared/context/LiveContext.tsx';
 import { APP_CONFIG } from '@shared/lib/config.ts';
+import { AeerksLogo } from '@shared/components/AeerksLogo.tsx';
 import confetti from 'canvas-confetti';
 import {
   Trophy,
   Sparkles,
   ChevronUp,
   ChevronDown,
+  Maximize,
 } from 'lucide-react';
 
+/** Ancienneté d'une donnée, en français, de façon compacte. */
+function formatAge(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 5) return "à l'instant";
+  if (s < 60) return `il y a ${s} s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `il y a ${m} min`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `il y a ${h} h`;
+  return `il y a ${Math.floor(h / 24)} j`;
+}
+
 export const LiveCompetitionPage: React.FC = () => {
-  const { liveState, timerLeft, timerRunning } = useLive();
+  const { liveState, timerLeft, timerRunning, isConnected, lastUpdateAt } = useLive();
   const [showRankings, setShowRankings] = useState(true);
+
+  // L'horloge du pied de page doit avancer même sans nouveau message WebSocket,
+  // sinon l'âge affiché resterait figé.
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => forceTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   const activeMatch = liveState?.activeMatch;
   const rankings = liveState?.rankings || [];
   const resultsPublished = liveState?.resultsPublished;
+  const eventName = liveState?.event?.name ?? null;
+
+  const connectionLabel = isConnected
+    ? 'Connecté au serveur en direct'
+    : 'Connexion au serveur perdue — reconnexion en cours';
+
+  // Plein écran pour vidéoprojecteur.
+  const toggleFullscreen = useCallback(() => {
+    const el = document.documentElement;
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => undefined);
+    } else if (el.requestFullscreen) {
+      void el.requestFullscreen().catch(() => undefined);
+    }
+  }, []);
 
   // Trigger celebration confetti when results are published
   useEffect(() => {
@@ -38,12 +75,71 @@ export const LiveCompetitionPage: React.FC = () => {
   const currentQ = activeMatch?.currentQuestion;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-[#071E42] to-[#0A2558] text-white flex flex-col justify-between p-4 sm:p-6 lg:p-8 relative overflow-hidden">
-      {/* Background Ambience / Subtle Grid */}
-      <div className="absolute inset-0 bg-[radial-gradient(#2563EB_1px,transparent_1px)] [background-size:24px_24px] opacity-15 pointer-events-none" />
+    <div className="min-h-dvh bg-gradient-to-br from-slate-900 via-[#071E42] to-[#0A2558] text-white flex flex-col p-4 sm:p-6 lg:p-8 relative">
+      {/* `overflow-hidden` ici tronquait le bas de l'écran sur un projecteur bas
+          ou en format portrait, sans aucun moyen de faire défiler. On défile
+          verticalement et on coupe seulement le débordement horizontal. */}
+      <div
+        aria-hidden="true"
+        className="absolute inset-0 bg-[radial-gradient(#2563EB_1px,transparent_1px)] [background-size:24px_24px] opacity-15 pointer-events-none"
+      />
+
+      {/* En-tête : identité AEERKS + état de la connexion.
+          L'écran public n'affichait aucune marque AEERKS. */}
+      <header className="relative z-10 flex items-center justify-between gap-4 pb-4 border-b border-white/10">
+        <div className="flex items-center gap-3 min-w-0">
+          <AeerksLogo size="sm" priority decorative />
+          <div className="min-w-0">
+            <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-blue-300">
+              AEERKS
+            </div>
+            <div className="text-sm sm:text-base font-black text-white leading-tight truncate">
+              Journée d'Excellence <span className="text-blue-300">— Génie en Herbe</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          {eventName && (
+            <span className="hidden sm:inline px-3 py-1.5 rounded-full bg-white/10 border border-white/15 text-[11px] font-bold text-blue-100 max-w-[16rem] truncate">
+              {eventName}
+            </span>
+          )}
+          <div
+            role="status"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-semibold border border-white/15 bg-white/5"
+            title={connectionLabel}
+          >
+            <span
+              aria-hidden="true"
+              className={`w-2 h-2 rounded-full ${
+                isConnected ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'
+              }`}
+            />
+            <span className="sr-only">{connectionLabel}</span>
+            <span aria-hidden="true" className="text-blue-100">
+              {isConnected ? 'Direct' : 'Reconnexion'}
+            </span>
+          </div>
+          {/* Plein écran : sur un vidéoprojecteur, l'opérateur ne peut pas
+              mettre en plein écran manuellement de façon fiable. */}
+          <button
+            type="button"
+            onClick={toggleFullscreen}
+            title="Passer en plein écran"
+            aria-label="Passer en plein écran"
+            className="p-1.5 rounded-lg border border-white/15 bg-white/5 text-blue-100 hover:bg-white/15 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+          >
+            <Maximize className="w-3.5 h-3.5" aria-hidden="true" />
+          </button>
+        </div>
+      </header>
 
       {/* MAIN SCREEN DYNAMICS */}
-      <main className="relative z-10 flex-1 my-6 flex flex-col justify-center max-w-7xl w-full mx-auto">
+      <main
+        id="contenu-principal"
+        className="relative z-10 flex-1 py-6 flex flex-col justify-center max-w-7xl w-full mx-auto"
+      >
         {/* CASE A: RESULTS PUBLISHED (Official Podium Section 24) */}
         {resultsPublished ? (
           <div id="screen-results-published" className="text-center py-6 animate-fade-in space-y-8">
@@ -319,21 +415,42 @@ export const LiveCompetitionPage: React.FC = () => {
 
       {/* Collapsible Rankings Drawer / Footer Ribbon */}
       <footer className="relative z-10 pt-4 border-t border-white/10">
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
           <button
-            onClick={() => setShowRankings(!showRankings)}
-            className="flex items-center gap-2 text-xs font-bold text-blue-300 hover:text-white transition-colors"
+            type="button"
+            onClick={() => setShowRankings((v) => !v)}
+            aria-expanded={showRankings}
+            aria-controls="classement-tournoi"
+            className="flex items-center gap-2 text-xs font-bold text-blue-300 hover:text-white transition-colors rounded px-1.5 py-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
           >
             <span>{showRankings ? 'Masquer' : 'Afficher'} le classement du tournoi</span>
-            {showRankings ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+            {showRankings ? (
+              <ChevronDown className="w-4 h-4" aria-hidden="true" />
+            ) : (
+              <ChevronUp className="w-4 h-4" aria-hidden="true" />
+            )}
           </button>
-          <span className="text-xs text-blue-200/60">
-            Association des Élèves et Étudiants Ressortissants de Keur Salla Mbatta
-          </span>
+
+          <div className="flex items-center gap-3 text-xs text-blue-200/60">
+            {/* Indique depuis quand l'état n'a pas été rafraîchi : sur un
+                écran qui tourne des heures, un état figé est immédiatement
+                repérable. */}
+            {lastUpdateAt != null && (
+              <span className="tabular-nums">
+                Actualisé {formatAge(Date.now() - lastUpdateAt)}
+              </span>
+            )}
+            <span className="hidden sm:inline">
+              Association des Élèves et Étudiants Ressortissants de Keur Salla Mbatta
+            </span>
+          </div>
         </div>
 
         {showRankings && rankings.length > 0 && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+          <div
+            id="classement-tournoi"
+            className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2"
+          >
             {rankings.map((r) => (
               <div
                 key={r.teamId}
