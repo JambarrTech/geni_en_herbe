@@ -90,9 +90,39 @@ export default tseslint.config(
     },
   },
 
-  // La config JSON de Firebase est un JSON, pas un module.
+  // Les fichiers de DÉCLARATIONS ne font qu'une chose : fusionner des
+  // interfaces avec des interfaces existantes. Un corps vide y est donc la
+  // forme normale et obligatoire — TypeScript exige que les paramètres de type
+  // soient identiques des deux côtés de la fusion, d'où le paramètre `T` jamais
+  // utilisé dans le corps.
+  //
+  // Les deux règles se déclenchent donc systématiquement et ne signalent
+  // jamais un vrai défaut. Désactivation recommandée par la documentation de
+  // `typescript-eslint` pour les `*.d.ts`.
   {
-    files: ['**/*.json'],
-    ...tseslint.configs.disableTypeChecked,
-  }
+    files: ['**/*.d.ts'],
+    rules: {
+      '@typescript-eslint/no-empty-object-type': 'off',
+      '@typescript-eslint/no-unused-vars': 'off',
+    },
+  },
+
+  // Les fichiers JSON ne sont pas du code JavaScript, et on ne les lint pas.
+  //
+  // HISTORIQUE
+  // ---------
+  // Un bloc `files: ['**/*.json']` existait ici, destiné à la configuration
+  // Firebase. Deux défauts : (1) `disableTypeChecked` ne désactive que les
+  // règles *typées* — les règles de base de JavaScript continuaient de
+  // s'appliquer ; (2) il rendait les JSON éligibles au lint.
+  //
+  // Conséquence, restée invisible : le premier `npm run lint` qui passait un
+  // répertoire contenant un `tsconfig.json` faisait remonter
+  //   `Expected an assignment or function call ... no-unused-expressions`
+  // sur la ligne 1 de CHAQUE tsconfig du dépôt. La règle lisait `{` comme une
+  // expression JavaScript parasite.
+  //
+  // On ignore donc explicitement les JSON, plutôt que de compter sur le fait
+  // qu'aucun bloc ne les réclame : c'est ce qui avait fait échouer.
+  { ignores: ['**/*.json'] }
 );

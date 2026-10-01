@@ -21,6 +21,25 @@ const FOCUSABLE_SELECTOR = [
 ].join(',');
 
 /**
+ * Amène le focus sur `target` en garantissant qu'il reste dans la boîte.
+ *
+ * `focus()` peut échouer silencieusement : sur un élément `display: none`, le
+ * navigateur retire le focus du document. Le focus partirait alors sur `body`,
+ * donc HORS de la modale — l'inverse exact de ce que le piège cherche à
+ * empêcher, et de façon invisible : rien ne signale que l'utilisateur a été
+ * éjecté.
+ *
+ * On retombe donc sur le panneau lui-même, qui est focusable (`tabIndex={-1}`).
+ * Le focus reste alors dans la boîte, ce qui est l'unique garantie utile.
+ */
+function focusInside(target: HTMLElement, panel: HTMLElement): void {
+  target.focus();
+  if (!panel.contains(document.activeElement)) {
+    panel.focus();
+  }
+}
+
+/**
  * Boîte de dialogue accessible.
  *
  * Remplace les 9 copies « fixed inset-0 z-50 bg-slate-900/40 … » qui
@@ -79,7 +98,19 @@ export const Modal: React.FC<ModalProps> = ({
       if (!panel) return;
 
       const focusables = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
-        (el) => el.offsetParent !== null || el === document.activeElement
+        // Filtre de visibilité.
+        //
+        // Le test classique est `offsetParent !== null`. On ne l'utilise PAS :
+        // `offsetParent` dépend d'une mise en page réelle et vaut TOUJOURS
+        // null hors navigateur (jsdom, et tout environnement de test). Le
+        // piège de focus disparaissait alors entièrement — c'est-à-dire que
+        // la garantie d'accessibilité n'était vérifiable nulle part, alors
+        // qu'elle est justement le motif d'être de ce composant.
+        //
+        // On s'en tient donc aux attributs, qui ont le même sens partout :
+        // `hidden` (HTML) et `aria-hidden` (ARIA) sont les deux seules
+        // manières standard de retirer un élément du parcours de tabulation.
+        (el) => !el.hasAttribute('hidden') && el.getAttribute('aria-hidden') !== 'true'
       );
       if (focusables.length === 0) {
         e.preventDefault();
@@ -92,10 +123,10 @@ export const Modal: React.FC<ModalProps> = ({
 
       if (e.shiftKey && (active === first || active === panel)) {
         e.preventDefault();
-        last.focus();
+        focusInside(last, panel);
       } else if (!e.shiftKey && active === last) {
         e.preventDefault();
-        first.focus();
+        focusInside(first, panel);
       }
     },
     [busy, onClose]

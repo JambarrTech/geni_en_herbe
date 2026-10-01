@@ -12,17 +12,26 @@
     "serve": "node scripts/serve.mjs",
     "build": "node scripts/build.mjs",
     "typecheck": "node scripts/typecheck.mjs",
-    "lint": "eslint apps/live/src apps/jury/src apps/admin/src shared backend/src",
-    "test": "node --import tsx --test backend/test/*.test.mjs",
+    "lint": "eslint apps/live/src apps/jury/src apps/admin/src shared backend/src tests",
+    "test": "npm run test:back && npm run test:front",
+    "test:back": "node --import tsx --test backend/test/*.test.mjs",
+    "test:front": "vitest run",
+    "test:watch": "vitest",
     "verify:css": "node scripts/verify-build-output.mjs",
     "verify:coverage": "node scripts/audit-css-coverage.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.7",
     "eslint": "^9.18.0",
     "eslint-plugin-react-hooks": "^5.1.0",
+    "jsdom": "^30.1.1",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
-    "typescript-eslint": "^8.20.0"
+    "typescript-eslint": "^8.20.0",
+    "vitest": "^5.0.3",
+    "vitest-axe": "^0.1.0"
   }
 }
