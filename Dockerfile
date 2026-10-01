@@ -45,7 +45,20 @@ COPY apps/admin/package.json apps/admin/
 # package.json). Le backend a son propre arbre : traité plus bas.
 RUN npm ci
 
-COPY shared/ ./shared/
+# `scripts/` est INDISPENSABLE au build, et son oubli a coûté un déploiement.
+#
+# `npm run build` exécute `node scripts/build.mjs`, qui compile les trois apps
+# puis lance `scripts/verify-build-output.mjs`. Sans cette copie, le build
+# échoue sur `Cannot find module '/repo/scripts/build.mjs'` — après que `npm ci`
+# a réussi, donc avec un journal de build qui montre 272 paquets installés
+# juste avant l'erreur.
+#
+# Copié avant `shared/` et `apps/` : ces deux-là changent à chaque édition,
+# `scripts/` beaucoup moins. Le cache Docker est invalidé du premier changement
+# vers le bas, donc mettre les fichiers stables en tête garde les couches
+# suivantes en cache.
+COPY scripts/ ./scripts/
+COPY shared/  ./shared/
 COPY apps/    ./apps/
 
 RUN npm run build
