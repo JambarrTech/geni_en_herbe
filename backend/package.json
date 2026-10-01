@@ -18,6 +18,7 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:seed:admin": "tsx src/db/seed-admin.ts",
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
