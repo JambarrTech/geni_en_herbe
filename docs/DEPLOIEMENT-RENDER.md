@@ -28,11 +28,33 @@ machine, une seule fois :
 cd backend
 $env:DATABASE_URL="postgresql://..."   # la NOUVELLE valeur
 npm run db:migrate
-npm run db:seed:admin                 # crée le compte ADMIN
 ```
 
-`db:seed:admin` lit `SEED_ADMIN_PASSWORD` — il échoue s'il est absent. C'est
-volontaire : aucun compte administrateur ne doit pouvoir être créé par défaut.
+Les migrations sont **idempotentes** : les relancer sur une base à jour n'écrit
+rien. Inutile de les retirer du projet.
+
+### `db:seed:admin` — à ne pas lancer sur un compte qui existe
+
+Ce script crée un administrateur, mais sur une base **déjà peuplée** il fait
+autre chose : le `UPDATE` de `src/db/seed-admin.ts` **écrase le mot de passe**
+du compte dont l'adresse correspond à `SEED_ADMIN_EMAIL`. Le lancer alors que
+votre compte existe revient à remplacer un mot de passe que vous connaissez par
+un que vous venez de fournir — donc à vous verrouiller dehors si le second
+vous échappe.
+
+Avant de l'exécuter, vérifiez l'état de la base (lecture seule, sans mot de
+passe) :
+
+```bash
+cd backend
+npm run db:comptes
+```
+
+S'il affiche `Compte trouvé`, **n'utilisez pas le seed**. Connectez-vous avec
+votre mot de passe actuel et changez-le depuis l'interface si vous voulez le
+renouveler. Le seed n'a de sens que sur une base vide ; il lit
+`SEED_ADMIN_PASSWORD` et échoue sans elle, volontairement — aucun compte
+administrateur ne doit pouvoir être créé par défaut.
 
 ## Pourquoi un seul service
 
@@ -56,7 +78,7 @@ Aucun *Build Command* supplémentaire n'est nécessaire : le `Dockerfile` compil
 les trois applications Vite et installe les dépendances de production du
 backend. `start:all` est la seule commande nécessaire.
 
-## Les trois-plusieurs-à-une disposition des ports
+## La disposition des ports : un seul point d'entrée
 
 | Processus | Port | Accessible de l'extérieur |
 | --- | --- | --- |
@@ -115,12 +137,13 @@ sur `/__static_health`, qui répond sans toucher à la base.
 
 ## Après le premier déploiement
 
-Une fois que tout fonctionne et que le compte admin existe, vous pouvez
-décommenter le job de migration dans `render.yaml` (il est fourni mais
-désactivé). **Attention** : `db:migrate` ne réinitialise pas de mot de passe,
-mais un job mal séquencé qui s'exécute à chaque déploiement allongerait chaque
-déploiement. Déclarez-le avant `aeerks` — Render exécute les services dans
-l'ordre déclaré.
+Le job de migration de `render.yaml` est fourni mais **désactivé** (commenté).
+C'est volontaire : les migrations sont appliquées à la main depuis votre machine
+une fois pour toutes, et un job qui s'exécute à chaque déploiement allonge
+chaque déploiement sans rien apporter. Si vous préférez l'automatiser,
+décommentez-le et **déclarez-le avant `aeerks`** : Render exécute les services
+dans l'ordre déclaré, donc le schéma sera prêt quand l'API recevra sa première
+requête.
 
 ## Et Vercel ?
 
@@ -131,4 +154,4 @@ supposerait le worker de chrono ailleurs, ce que le choix Render évite. Voir
 
 Si vous préférez ne garder qu'un seul chemin de déploiement, ces trois fichiers
 peuvent être supprimés : le dépôt fonctionne sans eux, et `npm run build`
-produit toujours les trois `dist` separately.
+produit toujours les trois `dist` séparément.
