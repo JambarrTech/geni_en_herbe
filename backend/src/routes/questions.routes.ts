@@ -7,6 +7,9 @@ import { logAudit } from '../server/matchEngine.ts';
 import { CONFIG, FLOW } from '../config.ts';
 import { adminWriteLimit } from '../middleware/rateLimit.ts';
 import { validateIds } from '../lib/validate.ts';
+import { createLogger } from '../lib/logger.ts';
+
+const log = createLogger('api');
 
 export const questionsRouter = Router();
 
@@ -134,7 +137,7 @@ questionsRouter.get('/', requireAuth, requireAdmin, async (_req: AuthRequest, re
 
     res.json(parsed);
   } catch (error: any) {
-    console.error('Erreur chargement questions:', error);
+    log.error('Erreur chargement questions', { err: error });
     res.status(500).json({ error: 'Impossible de charger les questions' });
   }
 });

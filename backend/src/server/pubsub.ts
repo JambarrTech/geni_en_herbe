@@ -1,5 +1,8 @@
 import { Client } from 'pg';
 import { CONFIG } from '../config.ts';
+import { createLogger } from '../lib/logger.ts';
+
+const log = createLogger('bus');
 
 /**
  * Bus d'événements inter-processus, adossé à PostgreSQL LISTEN/NOTIFY.
@@ -103,7 +106,7 @@ export function subscribe(
         try {
           onEvent(JSON.parse(msg.payload) as BusEvent);
         } catch (err) {
-          console.error('Événement de bus illisible:', err);
+          log.error('Événement de bus illisible', { err });
         }
       });
 

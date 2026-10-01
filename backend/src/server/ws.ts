@@ -4,6 +4,10 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { verifyToken } from '../middleware/auth.ts';
 import { subscribe, type BusEvent } from './pubsub.ts';
 import { CONFIG } from '../config.ts';
+import { createLogger } from '../lib/logger.ts';
+import { metrics, renderMetrics } from '../lib/metrics.ts';
+
+const log = createLogger('ws');
 
 /**
  * Processus de diffusion temps réel.
@@ -29,15 +33,27 @@ function fanOut(event: string, data: unknown) {
     // mégaoctet en attente, on le déconnecte ; il se resynchronisera.
     if (client.bufferedAmount > 1024 * 1024) {
       client.terminate();
+      metrics.wsBackpressureDrops.inc();
       continue;
     }
     client.send(payload);
+    metrics.wsMessages.inc();
   }
 }
 
 const PORT = Number(process.env.WS_PORT) || CONFIG.WS_PORT;
 
-const server = http.createServer((_req, res) => {
+const server = http.createServer((req, res) => {
+  // Sonde de métriques : cet écran est celui qui expose au scraping le nombre
+  // de clients connectés. Doit être traité AVANT la sonde de vivacité, sinon la
+  // jauge de connexion n'apparaît qu'après la première connexion.
+  if (req.url === '/metrics') {
+    res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    res.end(renderMetrics('ws'));
+    return;
+  }
+
   res.setHeader('Content-Type', 'application/json');
   res.end(
     JSON.stringify({
@@ -53,12 +69,14 @@ const wss = new WebSocketServer({
   maxPayload: CONFIG.WS_MAX_PAYLOAD_BYTES,
 });
 
-wss.on('error', (err) => console.error('Erreur WebSocketServer:', err));
+wss.on('error', (err) => log.error('Erreur WebSocketServer', { err }));
 
 wss.on('connection', (ws, req) => {
-  ws.on('close', () => clients.delete(ws));
+  ws.on('close', () => {
+    if (clients.delete(ws)) metrics.wsClients.dec();
+  });
   ws.on('error', (err) => {
-    console.error('Erreur WebSocket client:', err);
+    log.warn('Erreur WebSocket client', { err });
     clients.delete(ws);
   });
 
@@ -75,6 +93,7 @@ wss.on('connection', (ws, req) => {
           return;
         }
         clients.add(ws);
+        metrics.wsClients.inc();
         ws.send(
           JSON.stringify({ type: 'connected', authenticated: true, timestamp: Date.now() })
         );
@@ -86,6 +105,7 @@ wss.on('connection', (ws, req) => {
   }
 
   clients.add(ws);
+  metrics.wsClients.inc();
   ws.send(
     JSON.stringify({ type: 'connected', authenticated: false, timestamp: Date.now() })
   );
@@ -96,7 +116,7 @@ const unsubscribe = subscribe(
   (event: BusEvent) => {
     fanOut(event.type, event.data);
   },
-  (err) => console.error("Bus d'événements indisponible:", err.message)
+  (err) => log.error("Bus d'evenements indisponible", { err: err.message })
 );
 
 // Heartbeat : sans lui, un écran public inactif ne reçoit rien du serveur, et
@@ -105,15 +125,15 @@ const unsubscribe = subscribe(
 // Un ping toutes les 5 s maintient la connexion sans trafic d'application.
 const heartbeat = setInterval(() => {
   fanOut('ping', { ts: Date.now() });
-}, 5000);
+}, CONFIG.WS_HEARTBEAT_MS);
 heartbeat.unref();
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`[AEERKS ws] Diffusion temps réel sur ws://0.0.0.0:${PORT}/ws`);
+  log.info(`Diffusion temps reel sur ws://0.0.0.0:${PORT}/ws`);
 });
 
 const shutdown = (signal: string) => {
-  console.log(`[AEERKS ws] Arrêt demandé (${signal}).`);
+  log.info(`Arret demande (${signal}).`);
   unsubscribe();
   clearInterval(heartbeat);
   for (const client of clients) {
@@ -130,5 +150,5 @@ const shutdown = (signal: string) => {
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
-process.on('unhandledRejection', (reason) => console.error('Promesse non gérée:', reason));
-process.on('uncaughtException', (err) => console.error('Exception non interceptée:', err));
+process.on('unhandledRejection', (reason) => log.error('Promesse non geree', { err: reason }));
+process.on('uncaughtException', (err) => log.error('Exception non interceptee', { err }));

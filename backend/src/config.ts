@@ -96,6 +96,18 @@ export const CONFIG = {
   WS_CLOSE_INVALID_AUTH: 1008,
   WS_CLOSE_VERIFY_ERROR: 1011,
   WS_MAX_PAYLOAD_BYTES: 1024 * 1024, // 1 Mo
+
+  // --- Observabilité ---
+  // Longueur maximale du libellé de route exposé en métrique. Au-delà, le
+  // chemin est ramené à « autre » : une étiquette non bornée est une voie
+  // classique de saturation de cardinalité côté Prometheus.
+  METRICS_MAX_ROUTE_LABEL_LENGTH: 96,
+  // Fenêtre de latence conservée par la boucle d'événements, en millisecondes.
+  EVENT_LOOP_LAG_SAMPLE_MS: 1000,
+  // Durée sans trafic après laquelle la boucle de purge des sessions expirées
+  // s'auto-suspend. Une session affluent est rare hors connexion ; awakened le
+  // worker en permanence pour purger trois lignes serait du gaspillage.
+  SESSION_PURGE_IDLE_MS: 10 * 60_000,
 } as const;
 
 /**

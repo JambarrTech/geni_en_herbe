@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import type { AuthRequest } from './auth.ts';
 import { CONFIG } from '../config.ts';
+import { metrics } from '../lib/metrics.ts';
 
 /**
  * Limitation de débit en fenêtre glissante, par clé.
@@ -92,6 +93,9 @@ function defaultKey(req: Request): string {
 export function rateLimit(options: RateLimitOptions) {
   const { limit, windowMs, key = defaultKey, label = 'trop de requêtes' } = options;
   startSweeper(windowMs);
+  // Le libellé est un ensemble fini (un par route protégée), donc il peut
+  // servir d'étiquette de métrique sans risque de cardinalité.
+  const quotaLabel = label;
 
   return (req: Request, res: Response, next: NextFunction) => {
     const bucketKey = key(req);
@@ -103,6 +107,7 @@ export function rateLimit(options: RateLimitOptions) {
     if (bucket.hits.length >= limit) {
       bucket.blocked += 1;
       buckets.set(bucketKey, bucket);
+      metrics.rateLimitRejected.inc({ quota: quotaLabel });
       // Second de repos restant avant qu'une place se libère.
       const retryAfter = Math.max(1, Math.ceil((bucket.hits[0] + windowMs - now()) / 1000));
       res.setHeader('Retry-After', String(retryAfter));

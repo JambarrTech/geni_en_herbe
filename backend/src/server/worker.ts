@@ -7,6 +7,10 @@ import {
 } from './matchEngine.ts';
 import { tryAcquireLeaderLock, workerInstanceId, type LeaderLock } from './leaderLock.ts';
 import { CONFIG } from '../config.ts';
+import { createLogger } from '../lib/logger.ts';
+import { renderMetrics } from '../lib/metrics.ts';
+
+const log = createLogger('worker');
 
 /**
  * Worker de la boucle de chrono.
@@ -29,7 +33,26 @@ import { CONFIG } from '../config.ts';
  * Démarrer sans être leader produirait précisément la corruption décrite
  * ci-dessus, en silence.
  */
-const app = http.createServer((_req, res) => {
+/** Vrai tant que la boucle de chrono tourne réellement. */
+let leaderHeld = false;
+
+const app = http.createServer((req, res) => {
+  // Expose le leadership comme métrique : c'est l'information la plus critique
+  // de ce processus. Un worker en veille (un second worker, en attente de
+  // relèvement) répond 200 et semble sain — mais AUCUN chrono ne tourne.
+  // C'est exactement l'état qu'il faut voir dans un tableau de bord.
+  if (req.url === '/metrics') {
+    res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    res.end(
+      renderMetrics('worker', {
+        // 1 = la boucle tourne, 0 = ce worker est en veille.
+        leader: () => (leaderHeld ? 1 : 0),
+      })
+    );
+    return;
+  }
+
   res.setHeader('Content-Type', 'application/json');
   res.end(
     JSON.stringify({
@@ -37,6 +60,7 @@ const app = http.createServer((_req, res) => {
       service: 'AEERKS — worker chrono',
       pid: process.pid,
       instance: workerInstanceId,
+      leader: leaderHeld,
     })
   );
 });
@@ -64,9 +88,9 @@ function assertDirectConnection(): boolean {
   const url = process.env.DATABASE_URL ?? '';
   const pooled = /[?&]pgbouncer=true/i.test(url) || /[?&]pool_mode=transaction/i.test(url);
   if (pooled) {
-    console.error(
-      '[AEERKS worker] DATABASE_URL pointe vers un pooler en mode transaction. ' +
-        'Les verrous consultatifs y sont attachés à une session serveur réassignable : ' +
+    log.error(
+      'DATABASE_URL pointe vers un pooler en mode transaction. ' +
+        'Les verrous consultatifs y sont attaches a une session serveur reassignable : ' +
         'le worker perdrait le verrou sans le savoir. Utilisez la connexion directe.'
     );
     return false;
@@ -87,7 +111,7 @@ async function tryBecomeLeader(): Promise<boolean> {
     await client.connect();
   } catch (err) {
     const raison = err instanceof Error ? err.message : String(err);
-    console.error(`[AEERKS worker] Connexion impossible pour le verrou de leader : ${raison}`);
+    log.error('Connexion impossible pour le verrou de leader', { raison });
     return false;
   }
 
@@ -99,10 +123,11 @@ async function tryBecomeLeader(): Promise<boolean> {
     return false;
   }
 
+  leaderHeld = true;
   startAuthoritativeTimerLoop();
-  console.log(
-    `[AEERKS worker] Verrou de leader obtenu (instance ${workerInstanceId}). Boucle de chrono démarrée.`
-  );
+  log.info('Verrou de leader obtenu. Boucle de chrono démarrée.', {
+    instance: workerInstanceId,
+  });
   return true;
 }
 
@@ -118,26 +143,28 @@ function planRetry() {
 }
 
 app.listen(PORT, '0.0.0.0', async () => {
-  console.log(`[AEERKS worker] Sonde de vivacité sur http://0.0.0.0:${PORT}`);
-  console.log(`[AEERKS worker] Instance ${workerInstanceId} (pid ${process.pid})`);
+  log.info(`Sonde de vivacite sur http://0.0.0.0:${PORT}`, {
+    instance: workerInstanceId,
+  });
 
   const obtenu = await tryBecomeLeader();
   if (!obtenu) {
-    console.warn(
-      '[AEERKS worker] Un autre worker détient déjà la boucle de chrono. ' +
-        'Ce process reste en veille et la prendra s\'il s\'arrête.'
+    log.warn(
+      'Un autre worker detient deja la boucle de chrono. ' +
+        'Ce process reste en veille et la prendra s\'il s\'arrete.'
     );
     planRetry();
   }
 });
 
 const shutdown = async (signal: string) => {
-  console.log(`[AEERKS worker] Arrêt demandé (${signal}).`);
+  log.info(`Arrêt demandé (${signal}).`);
   if (retryTimer) clearTimeout(retryTimer);
   if (leader.held) {
     stopAuthoritativeTimerLoop();
     await leader.release();
-    console.log('[AEERKS worker] Verrou de leader relâché.');
+    leaderHeld = false;
+    log.info('Verrou de leader relâché.');
   }
   app.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 5000).unref();
@@ -145,5 +172,5 @@ const shutdown = async (signal: string) => {
 process.on('SIGTERM', () => void shutdown('SIGTERM'));
 process.on('SIGINT', () => void shutdown('SIGINT'));
 
-process.on('unhandledRejection', (reason) => console.error('Promise non gérée:', reason));
-process.on('uncaughtException', (err) => console.error('Exception non interceptée:', err));
+process.on('unhandledRejection', (reason) => log.error('Promise non gérée', { err: reason }));
+process.on('uncaughtException', (err) => log.error('Exception non interceptée', { err }));

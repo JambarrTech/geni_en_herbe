@@ -8,6 +8,10 @@ import { logAudit } from '../server/matchEngine.ts';
 import { verifyPassword } from '../lib/password.ts';
 import { loginIpFailures } from '../middleware/rateLimit.ts';
 import { CONFIG } from '../config.ts';
+import { createLogger } from '../lib/logger.ts';
+import { metrics } from '../lib/metrics.ts';
+
+const log = createLogger('api');
 
 export const authRouter = Router();
 
@@ -66,6 +70,7 @@ authRouter.post('/login', async (req: Request, res: Response) => {
 
     if (isBlocked(key)) {
       const minutes = Math.round(CONFIG.LOGIN_WINDOW_MS / 60000);
+      metrics.rateLimitRejected.inc({ quota: 'login-compte' });
       return res.status(429).json({
         error: `Trop de tentatives échouées. Réessayez dans ${minutes} minutes.`,
       });
@@ -79,6 +84,7 @@ authRouter.post('/login', async (req: Request, res: Response) => {
     if (loginIpFailures.isBlocked(ipKey)) {
       const seconds = loginIpFailures.retryAfter(ipKey);
       res.setHeader('Retry-After', String(seconds));
+      metrics.rateLimitRejected.inc({ quota: 'login-ip' });
       return res.status(429).json({
         error: `Trop de tentatives infructueuses depuis ce poste. Réessayez dans ${Math.ceil(seconds / 60)} minute(s).`,
       });
@@ -107,6 +113,14 @@ authRouter.post('/login', async (req: Request, res: Response) => {
     if (!user || !user.passwordHash || !passwordMatches) {
       registerFailure(key);
       loginIpFailures.penalize(ipKey);
+      // Journalise l'échec avec le couple IP + compte, mais jamais le mot de
+      // passe ni le jeton : une rafale de 401 sur des comptes distincts depuis
+      // une même IP est la signature d'un bourrage d'identifiants.
+      log.warn('Echec de connexion', {
+        compteExiste: Boolean(user),
+        ip,
+        userAgent: req.get('user-agent') ?? null,
+      });
       return res.status(401).json({ error: 'Identifiants invalides' });
     }
 
@@ -144,7 +158,7 @@ authRouter.post('/login', async (req: Request, res: Response) => {
       user: userProfile,
     });
   } catch (error: any) {
-    console.error('Erreur login:', error);
+    log.error('Erreur login', { err: error });
     res.status(500).json({ error: 'Erreur serveur lors de la connexion' });
   }
 });

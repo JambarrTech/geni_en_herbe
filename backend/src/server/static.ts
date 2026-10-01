@@ -6,6 +6,10 @@ import { fileURLToPath } from 'url';
 import httpProxy from 'http-proxy';
 import { securityHeaders } from '../lib/securityHeaders.ts';
 import { CONFIG } from '../config.ts';
+import { createLogger } from '../lib/logger.ts';
+import { renderMetrics } from '../lib/metrics.ts';
+
+const log = createLogger('static');
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(currentDir, '..', '..', '..');
@@ -51,7 +55,7 @@ proxy.on('error', ((
   res: http.ServerResponse
 ) => {
   upstreamErrors += 1;
-  console.error('[static] Amont injoignable :', err.message);
+  log.error('Amont injoignable', { err });
   if (res && !res.headersSent && 'writeHead' in res) {
     res.writeHead(502, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Service temporairement indisponible' }));
@@ -83,6 +87,22 @@ server.on('request', (req, res) => {
         api: API_TARGET,
         ws: WS_TARGET,
         upstreamErrors,
+      })
+    );
+    return;
+  }
+
+  // Métriques : également avant la CSP et avant le relais, pour les mêmes
+  // raisons — un scrape ne doit dépendre ni de la politique de sécurité, ni
+  // de la disponibilité de l'API.
+  if (req.url === '/__static_metrics') {
+    res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    res.end(
+      renderMetrics('static', {
+        // Compteur d'erreurs d'amont : le nombre de 502 rendus. Un zéro qui
+        // monte est le signal le plus direct d'un backend tombé.
+        upstream_errors: () => upstreamErrors,
       })
     );
     return;
@@ -145,8 +165,9 @@ if (!fs.existsSync(liveDist)) missing.push('apps/live/dist');
 if (!fs.existsSync(juryDist)) missing.push('apps/jury/dist');
 if (!fs.existsSync(adminDist)) missing.push('apps/admin/dist');
 if (missing.length > 0) {
-  console.warn(
-    `[static] Builds absents : ${missing.join(', ')}. Lancez \`npm run build\`.`
+  log.warn(
+    `Builds absents : ${missing.join(', ')}. Lancez \`npm run build\`.`,
+    { manquants: missing }
   );
 }
 
@@ -213,18 +234,20 @@ function serveStatic(url: string, res: http.ServerResponse) {
 const PORT = Number(process.env.STATIC_PORT) || CONFIG.STATIC_PORT;
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`[AEERKS static] Point d'entrée sur http://0.0.0.0:${PORT}`);
-  console.log(`[AEERKS static]   /       écran public    /jury   jury   /admin  administration`);
-  console.log(`[AEERKS static]   /api → ${API_TARGET}    /ws → ${WS_TARGET}`);
+  log.info(`Point d'entrée sur http://0.0.0.0:${PORT}`, {
+    apps: '/ écran public · /jury · /admin',
+    api: API_TARGET,
+    ws: WS_TARGET,
+  });
 });
 
 const shutdown = (signal: string) => {
-  console.log(`[AEERKS static] Arrêt demandé (${signal}).`);
+  log.info(`Arrêt demandé (${signal}).`);
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 5000).unref();
 };
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
-process.on('unhandledRejection', (reason) => console.error('Promesse non gérée:', reason));
-process.on('uncaughtException', (err) => console.error('Exception non interceptée:', err));
+process.on('unhandledRejection', (reason) => log.error('Promesse non gérée', { err: reason }));
+process.on('uncaughtException', (err) => log.error('Exception non interceptée', { err }));

@@ -7,6 +7,9 @@ import { logAudit } from '../server/matchEngine.ts';
 import { isForeignKeyViolation, FK_DELETE_MESSAGES } from '../lib/dbErrors.ts';
 import { adminWriteLimit } from '../middleware/rateLimit.ts';
 import { validateIds } from '../lib/validate.ts';
+import { createLogger } from '../lib/logger.ts';
+
+const log = createLogger('api');
 
 export const categoriesRouter = Router();
 
@@ -68,7 +71,7 @@ categoriesRouter.delete('/:id', requireAuth, requireAdmin, adminWriteLimit, asyn
     await logAudit(req.user?.uid, req.user?.email, 'DELETE_CATEGORY', 'category', String(id));
     res.json({ success: true });
   } catch (error: any) {
-    console.error('DELETE category error:', error);
+    log.error('DELETE category error', { err: error });
     if (isForeignKeyViolation(error)) {
       return res.status(400).json({ error: FK_DELETE_MESSAGES.category });
     }

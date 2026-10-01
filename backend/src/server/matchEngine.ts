@@ -13,6 +13,10 @@ import { type TeamRanking, type LiveStatePayload } from '../types.ts';
 import { publicQuestion } from '../lib/sanitize.ts';
 import { publish as publishBusEvent } from './pubsub.ts';
 import { CONFIG, FLOW } from '../config.ts';
+import { createLogger } from '../lib/logger.ts';
+import { metrics } from '../lib/metrics.ts';
+
+const log = createLogger('matchEngine');
 
 // Web socket broadcast callback hook.
 //
@@ -31,9 +35,15 @@ export function setBroadcastCallback(fn: BroadcastFn) {
 
 export function broadcast(event: string, data: any) {
   // 1. Bus inter-processus : c'est lui qui atteint le serveur WebSocket.
-  void publishBusEvent({ type: event, data }).catch((err) => {
-    console.error(`Diffusion « ${event} » impossible via le bus:`, err);
-  });
+  void publishBusEvent({ type: event, data })
+    .then(() => metrics.busPublished.inc({ type: event }))
+    .catch((err) => {
+      metrics.busErrors.inc({ type: event });
+      // Non bloquant : l'état en base fait foi, et les clients se
+      // resynchronisent à la reconnexion. Un échec ici signifie un écran
+      // retardé, pas une action perdue.
+      log.error(`Diffusion « ${event} » impossible via le bus`, { err });
+    });
 
   // 2. Rappel en mémoire, seulement s'il existe (mode monolithique).
   if (broadcastCallback) {
@@ -60,7 +70,12 @@ export async function logAudit(
       metadata: metadata || null,
     });
   } catch (err) {
-    console.error('Erreur enregistrement audit log:', err);
+    // L'audit n'est jamais bloquant : une ligne manquante ne doit pas faire
+    // échouer l'action métier qui venait de réussir. En revanche, un échec
+    // répété ici est une perte de traçabilité réelle, donc on le compte et on
+    // le signale.
+    metrics.dbErrors.inc({ operation: 'audit' });
+    log.error('Erreur enregistrement audit log', { err, action, entity });
   }
 }
 
@@ -95,13 +110,14 @@ function scheduleNextTimerTick(delayMs: number) {
       consecutiveDbFailures = 0;
     } catch (err) {
       consecutiveDbFailures += 1;
+      metrics.dbErrors.inc({ operation: 'timer-tick' });
       if (consecutiveDbFailures === 1) {
         // Une seule fois l'erreur complète : évite le mur de stack traces.
-        console.error('Erreur boucle chrono serveur (base de données injoignable ?):', err);
+        log.error('Erreur boucle chrono serveur (base de données injoignable ?)', { err });
       } else if (consecutiveDbFailures % 20 === 0) {
-        console.warn(
-          `Boucle chrono : ${consecutiveDbFailures} échecs de base consécutifs — prochaine tentative dans ${nextDelay} ms`
-        );
+        log.warn(`Boucle chrono : ${consecutiveDbFailures} échecs de base consécutifs`, {
+          prochaineTentativeMs: nextDelay,
+        });
       }
       nextDelay = Math.min(
         CONFIG.TIMER_LOOP_INTERVAL_MS *

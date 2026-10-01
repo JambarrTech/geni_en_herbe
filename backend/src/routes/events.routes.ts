@@ -14,6 +14,9 @@ import { FLOW } from '../config.ts';
 import { matches } from '../db/schema.ts';
 import { adminWriteLimit } from '../middleware/rateLimit.ts';
 import { validateIds } from '../lib/validate.ts';
+import { createLogger } from '../lib/logger.ts';
+
+const log = createLogger('api');
 
 export const eventsRouter = Router();
 
@@ -171,7 +174,7 @@ eventsRouter.post('/:id/publish-results', requireAuth, requireAdmin, adminWriteL
       rankings,
     });
   } catch (error: any) {
-    console.error('Erreur publication résultats:', error);
+    log.error('Erreur publication résultats', { err: error });
     res.status(500).json({ error: 'Erreur lors de la publication des résultats' });
   }
 });
@@ -206,7 +209,7 @@ eventsRouter.delete('/:id', requireAuth, requireAdmin, adminWriteLimit, async (r
     await logAudit(req.user?.uid, req.user?.email, 'DELETE_EVENT', 'event', String(id));
     res.json({ success: true });
   } catch (error: any) {
-    console.error('DELETE event error:', error);
+    log.error('DELETE event error', { err: error });
     if (isForeignKeyViolation(error)) {
       return res.status(400).json({ error: FK_DELETE_MESSAGES.event });
     }

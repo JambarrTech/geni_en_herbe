@@ -1,4 +1,4 @@
-import { Router, type Response } from 'express';
+﻿import { Router, type Response } from 'express';
 import { db } from '../db/index.ts';
 import {
   matches,
@@ -23,6 +23,9 @@ import { selectQuestionsForMatch } from '../lib/selectQuestions.ts';
 import { scoreLimit, controlLimit, adminWriteLimit } from '../middleware/rateLimit.ts';
 import { CONFIG, FLOW } from '../config.ts';
 import { validateIds } from '../lib/validate.ts';
+import { createLogger } from '../lib/logger.ts';
+
+const log = createLogger('api');
 
 export const matchesRouter = Router();
 
@@ -43,7 +46,7 @@ function parseOptions(raw: string | null | undefined): string[] | null {
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : null;
   } catch {
-    console.error('options question mal formées (JSON invalide) :', raw.slice(0, 80));
+    log.warn('options question mal formées (JSON invalide)', { apercu: raw.slice(0, 80) });
     return null;
   }
 }
@@ -884,7 +887,7 @@ matchesRouter.post('/:id/score', requireAuth, requireJuryOrAdmin, scoreLimit, as
       event: result.ev,
     });
   } catch (error: any) {
-    console.error('Erreur score:', error);
+    log.error('Erreur score', { err: error });
     res.status(500).json({ error: 'Erreur lors de l\'enregistrement du score' });
   }
 });
@@ -1001,7 +1004,7 @@ matchesRouter.post('/:id/adjust-score', requireAuth, requireJuryOrAdmin, scoreLi
 
     res.json({ success: true, scoreA, scoreB, event: ev });
   } catch (error: any) {
-    console.error('Erreur ajustement score:', error);
+    log.error('Erreur ajustement score', { err: error });
     res.status(500).json({ error: 'Erreur lors de l\'ajustement du score' });
   }
 });
@@ -1040,7 +1043,7 @@ matchesRouter.post('/:id/finish', requireAuth, requireJuryOrAdmin, controlLimit,
 
     res.json(updated);
   } catch (error: any) {
-    console.error('Erreur clôture match:', error);
+    log.error('Erreur cloture match', { err: error });
     res.status(500).json({ error: 'Erreur clôture match' });
   }
 });
@@ -1074,7 +1077,7 @@ matchesRouter.delete('/:id', requireAuth, requireAdmin, adminWriteLimit, async (
     await logAudit(req.user?.uid, req.user?.email, 'DELETE_MATCH', 'match', String(id));
     res.json({ success: true });
   } catch (error: any) {
-    console.error('DELETE match error:', error);
+    log.error('DELETE match error', { err: error });
     res.status(500).json({ error: 'Erreur lors de la suppression du match' });
   }
 });

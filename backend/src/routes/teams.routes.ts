@@ -9,6 +9,9 @@ import { getSetting } from '../lib/settings.ts';
 import { CONFIG, FLOW } from '../config.ts';
 import { adminWriteLimit } from '../middleware/rateLimit.ts';
 import { validateIds } from '../lib/validate.ts';
+import { createLogger } from '../lib/logger.ts';
+
+const log = createLogger('api');
 
 export const teamsRouter = Router();
 
@@ -142,7 +145,7 @@ teamsRouter.delete('/:id', requireAuth, requireAdmin, adminWriteLimit, async (re
     await logAudit(req.user?.uid, req.user?.email, 'DELETE_TEAM', 'team', String(id));
     res.json({ success: true });
   } catch (error: any) {
-    console.error('DELETE team error:', error);
+    log.error('DELETE team error', { err: error });
     if (isForeignKeyViolation(error)) {
       return res.status(400).json({ error: FK_DELETE_MESSAGES.team });
     }

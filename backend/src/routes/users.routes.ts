@@ -8,6 +8,9 @@ import { logAudit } from '../server/matchEngine.ts';
 import { hashPassword } from '../lib/password.ts';
 import { adminWriteLimit } from '../middleware/rateLimit.ts';
 import { validateIds } from '../lib/validate.ts';
+import { createLogger } from '../lib/logger.ts';
+
+const log = createLogger('api');
 
 export const usersRouter = Router();
 
@@ -150,7 +153,10 @@ usersRouter.patch('/:id', requireAuth, requireAdmin, adminWriteLimit, async (req
     if (active === false || (role && role !== target.role)) {
       const revoked = revokeAllSessionsForUser(id);
       if (revoked > 0) {
-        console.log(`[auth] ${revoked} session(s) révoquée(s) pour l'utilisateur ${id}`);
+        log.info('Sessions révoquées après changement de droits', {
+          utilisateur: id,
+          sessions: revoked,
+        });
       }
     }
 

@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { createLogger } from '../lib/logger.ts';
+
+const log = createLogger('worker');
 
 /**
  * Verrou de leader pour le worker de chrono.
@@ -97,10 +100,9 @@ export async function tryAcquireLeaderLock(dbClient: {
     // Échec d'acquisition = échec du leadership. On ne suppose pas le
     // contraire : démarrer la boucle sans être leader produirait exactement la
     // corruption décrite plus haut.
-    console.error(
-      "[AEERKS worker] Impossible de tester le verrou de leader :",
-      err instanceof Error ? err.message : err
-    );
+    log.error('Impossible de tester le verrou de leader', {
+      err: err instanceof Error ? err.message : err,
+    });
     return { held: false, release: async () => {} };
   }
 }

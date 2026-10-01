@@ -7,6 +7,9 @@ import { logAudit } from '../server/matchEngine.ts';
 import { isForeignKeyViolation, FK_DELETE_MESSAGES } from '../lib/dbErrors.ts';
 import { adminWriteLimit } from '../middleware/rateLimit.ts';
 import { validateIds } from '../lib/validate.ts';
+import { createLogger } from '../lib/logger.ts';
+
+const log = createLogger('api');
 
 export const participantsRouter = Router();
 
@@ -114,7 +117,7 @@ participantsRouter.delete('/:id', requireAuth, requireAdmin, adminWriteLimit, as
     );
     res.json({ success: true });
   } catch (error: any) {
-    console.error('DELETE participant error:', error);
+    log.error('DELETE participant error', { err: error });
     if (isForeignKeyViolation(error)) {
       return res.status(400).json({ error: FK_DELETE_MESSAGES.participant });
     }

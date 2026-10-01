@@ -2,6 +2,10 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import * as schema from './schema.ts';
 import { CONFIG } from '../config.ts';
+import { createLogger } from '../lib/logger.ts';
+import { metrics } from '../lib/metrics.ts';
+
+const log = createLogger('db');
 
 declare global {
   var _postgresPool: Pool | undefined;
@@ -27,8 +31,8 @@ const rejectUnauthorized =
   process.env.DB_SSL_REJECT_UNAUTHORIZED !== '0' && process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false';
 
 if (!rejectUnauthorized && databaseUrlConfigured()) {
-  console.warn(
-    '[db] DB_SSL_REJECT_UNAUTHORIZED=0 : la validation du certificat PostgreSQL est DÉSACTIVÉE. ' +
+  log.warn(
+    'DB_SSL_REJECT_UNAUTHORIZED=0 : la validation du certificat PostgreSQL est DÉSACTIVÉE. ' +
       'À n\'utiliser que pour une base locale avec certificat auto-signé.'
   );
 }
@@ -60,9 +64,24 @@ export const createPool = () => {
       });
     }
 
+    // Une erreur « idle » du client PostgreSQL n'est pas une erreur de
+    // requête : c'est le pool qui signale une connexion morte en cours de
+    // réutilisation. `pg` la retire lui-même du pool ; on la journalise et on
+    // la compte pour voir si la base coupe les connexions en cours de
+    // compétition (fréquent chez les hébergeurs managés).
     global._postgresPool.on('error', (err) => {
-      console.error('Erreur inattendue sur le pool SQL:', err);
+      metrics.dbErrors.inc({ operation: 'pool-idle' });
+      log.error('Erreur inattendue sur le pool SQL', { err });
     });
+
+    // Connexions en attente : la file d'attente du pool est le premier signe
+    // d'un `DB_POOL_MAX` trop bas pour la charge réelle. Sans cette jauge, un
+    // pool saturé se manifeste seulement par une latence inexplicablement
+    // haute sur les requetes deja acceptees.
+    const timer = setInterval(() => {
+      metrics.dbPoolWaiting.set(global._postgresPool?.waitingCount ?? 0);
+    }, 5_000);
+    timer.unref();
   }
   return global._postgresPool;
 };
