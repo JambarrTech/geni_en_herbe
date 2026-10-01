@@ -14,6 +14,7 @@
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 
 import {
   envForService,
@@ -125,6 +126,20 @@ describe('envForService — la regle qui compte', () => {
     const env = envForService({ platformPort: undefined, isPublic: false, baseEnv: { ...BASE } });
     assert.equal(env.PORT, undefined);
     assert.equal(env.DATABASE_URL, BASE.DATABASE_URL);
+  });
+
+  test("le superviseur transmet son environnement a chaque enfant", async () => {
+    // Garde-fou d'INTÉGRATION. `envForService` ci-dessus est pure : elle n'est
+    // correcte que si l'APPELANT lui passe `baseEnv`. Le type le garantit a la
+    // compilation ; ce test le grave aussi dans la suite pour que le role de
+    // `portsFor` (copier `process.env`) ne disparaisse pas en silence.
+    //
+    // Le bug a eu lieu. Les quatre processus ne recevaient que leurs ports,
+    // donc plus de `DATABASE_URL`. Invisible en local, ou `dotenv` relit
+    // `backend/.env` depuis le dossier courant ; fatal dans l'image, qui
+    // l'exclut par `.dockerignore`.
+    const source = await readFile(new URL('../src/supervisor.ts', import.meta.url), 'utf8');
+    assert.match(source, /baseEnv:\s*process\.env/);
   });
 });
 

@@ -133,9 +133,17 @@ COPY --from=apps-build  /repo/apps/jury/dist  ./apps/jury/dist
 COPY --from=apps-build  /repo/apps/admin/dist ./apps/admin/dist
 
 # Le conteneur ne doit ni écrire dans l'image, ni tourner en root.
+#
+# `-h /home/aeerks` + `HOME` explicite : `npm run` a besoin d'un dossier
+# d'accueil ÉCRIVABLE pour son cache et ses journaux. Sans lui, npm vise un
+# chemin inexistant ou hérité de root (« /root »), échoue sur `EACCES` — un
+# défaut qui n'apparaît qu'en production, où l'utilisateur n'est pas celui du
+# poste de développement.
 RUN addgroup -S aeerks \
- && adduser -S -G aeerks -H -s /sbin/nologin aeerks \
- && chown -R aeerks:aeerks /repo
+ && adduser -S -G aeerks -h /home/aeerks -s /sbin/nologin aeerks \
+ && mkdir -p /home/aeerks/.npm \
+ && chown -R aeerks:aeerks /home/aeerks /repo
+ENV HOME=/home/aeerks
 USER aeerks
 
 WORKDIR /repo/backend

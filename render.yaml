@@ -26,23 +26,21 @@ services:
     # dépendances de production du backend : il n'y a rien à faire avant.
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    # `dockerCommand`, et NON `buildCommand`.
+    # AUCUNE surcharge de `buildCommand` NI de `dockerCommand`.
     #
-    # Render réserve `buildCommand` aux runtimes natifs (node, python…) : sur un
-    # service `runtime: docker`, c'est le Dockerfile qui construit, et le champ
-    # qui remplace son `CMD` est `dockerCommand`. Un `buildCommand` ici serait
-    # purement ignoré — et laisserait croire qu'une étape de construction
-    # existe, alors que c'est le Dockerfile qui s'en charge.
+    # `buildCommand` est réservé par Render aux runtimes natifs (node, python…) :
+    # sur un service `runtime: docker`, c'est le Dockerfile qui construit. Un
+    # `buildCommand` ici serait purement ignoré — et laisserait croire qu'une
+    # étape de construction existe, alors que c'est le Dockerfile qui s'en charge.
     #
-    # Le `CMD` du Dockerfile est déjà `start:all`, donc ce champ est
-    # techniquement facultatif. On l'écrit quand même, pour deux raisons : le superviseur est
-    # l'entrée du déploiement, elle mérite d'être visible dans la configuration
-    # Render et pas seulement dans le Dockerfile ; et un jour où le `CMD` serait
-    # modifié, Render ne démarrerait pas le mauvais processus.
-    #
-    # Valeur : ce que Render passe en arguments de l'ENTRYPOINT, qui est
-    # `tini -- npm run`. Donc `npm run start:all`.
-    dockerCommand: start:all
+    # `dockerCommand` reste volontairement ABSENT. Le Dockerfile déclare déjà
+    # `ENTRYPOINT ["/sbin/tini", "--", "npm", "run"]` et `CMD ["start:all"]`,
+    # soit exactement le processus voulu. Une surcharge Render ajoutait une
+    # seconde source de vérité pour le même résultat, et surtout une
+    # réinterprétation : ce champ est une LIGNE DE COMMANDE que Render applique
+    # au conteneur, pas forcément un simple argument d'ENTRYPOINT. Le `CMD` du
+    # Dockerfile est le comportement Docker standard, documenté et vérifiable ;
+    # on s'y tient, d'autant que le redémarrage du conteneur en dépendait.
 
     # Sonde de Render. `/__static_health` est exposée par le processus `static`
     # et répond avant toute politique de sécurité : une sonde qui dépend de la

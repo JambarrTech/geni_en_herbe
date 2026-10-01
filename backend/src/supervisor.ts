@@ -116,7 +116,14 @@ function pipe(prefix: string, stream: NodeJS.ReadableStream | null, sink: NodeJS
  * l'exécution : mieux vaut que la règle soit éprouvable.
  */
 function portsFor(service: Service): NodeJS.ProcessEnv {
-  return envForService({ platformPort: process.env.PORT, isPublic: service.public });
+  return envForService({
+    platformPort: process.env.PORT,
+    isPublic: service.public,
+    // L'ENFANT HÉRITE DE TOUT : `spawn` REMPLACE l'environnement, il ne le
+    // fusionne pas. Sans cette ligne, les quatre processus ne recevaient que
+    // leurs ports — ni `DATABASE_URL`, ni `NODE_ENV`, ni `TRUST_PROXY`.
+    baseEnv: process.env,
+  });
 }
 
 /** Environnement complet d'un service. */

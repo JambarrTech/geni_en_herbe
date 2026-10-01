@@ -59,17 +59,29 @@ export function privatePortEnv(): Record<string, never> {
 /**
  * Construit l'environnement d'un service.
  *
+ * `baseEnv` est REQUIS, et non optionnel : `spawn` ne fusionne PAS
+ * `process.env` avec l'objet fourni. Sans cette copie, les quatre processus
+ * enfants ne recevaient que leurs variables de port — plus de `DATABASE_URL`,
+ * plus de `NODE_ENV`, plus de `TRUST_PROXY`.
+ *
+ * Le défaut restait invisible en local : chaque service commence par
+ * `import 'dotenv/config'`, qui relit `backend/.env`. Dans l'image,
+ * `.dockerignore` exclut ce fichier : la production était donc la seule à
+ * le voir. Rendre le paramètre obligatoire déplace la garantie du test
+ * unitaire (qui, lui, passait toujours `baseEnv`) vers le compilateur.
+ *
  * @param platformPort  Valeur de `PORT` injectée par la plateforme.
  * @param isPublic      Le service est-il celui qui reçoit le trafic ?
+ * @param baseEnv       Environnement hérité, à copier tel quel.
  */
 export function envForService(options: {
   platformPort: string | undefined;
   isPublic: boolean;
-  baseEnv?: NodeJS.ProcessEnv;
+  baseEnv: NodeJS.ProcessEnv;
 }): NodeJS.ProcessEnv {
   const { platformPort, isPublic, baseEnv } = options;
 
-  const env: NodeJS.ProcessEnv = { ...(baseEnv ?? {}) };
+  const env: NodeJS.ProcessEnv = { ...baseEnv };
 
   if (isPublic) {
     Object.assign(env, publicPortEnv(platformPort));
