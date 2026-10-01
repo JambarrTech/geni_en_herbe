@@ -28,7 +28,7 @@
  * Contrainte de cardinalite
  * -------------------------
  * Une metrique avec une etiquette libre (identifiant de match, IP, email) cree
- * une serie par valeur. En competition, un membre du jury peut提供服务 a
+ * une serie par valeur. En competition, un membre du jury peut participer a
  * plusieurs dizaines de matchs : on ne met JAMAIS d'identifiant metier en
  * etiquette. Seules des valeurs d'un ensemble fini sont utilisees, et
  * `routeLabel` garantit un ensemble fini cote route.

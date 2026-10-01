@@ -118,7 +118,7 @@ async function tryBecomeLeader(): Promise<boolean> {
   leader = await tryAcquireLeaderLock(client);
 
   if (!leader.held) {
-    // La connexion est lâchée sans verrou : rien à تنظيف côté PostgreSQL.
+    // La connexion est lâchée sans verrou : rien à nettoyer côté PostgreSQL.
     void client.end().catch(() => {});
     return false;
   }

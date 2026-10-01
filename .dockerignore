@@ -1,8 +1,8 @@
 # Contexte de construction : le contexte est la RACINE du dépôt, car le
 # Dockerfile a besoin des trois apps, de `shared/` et du backend.
 
-# Dépendances : réinstallées dans l'image. Lesangler évite plusieurs gigas
-# octets de contexte et des invalidections de cache inutiles.
+# Dépendances : réinstallées dans l'image. Les exclure évite plusieurs gigas
+# octets de contexte et des invalidations de cache inutiles.
 node_modules
 **/node_modules
 # Builds : le Dockerfile les recompile dans l'étape `apps-build`. Les inclure

@@ -7,8 +7,8 @@
  * valide. Une faute de frappe dans un champ se paie par un deploiement rate,
  * avec un message qui parle du build et jamais de la configuration.
  *
- * Ce fichier le lit avec le meme parseur YAML que les editeurs (js-yaml, le
- * parseur des quiches dans node_modules) et affiche la structure telle que
+ * Ce fichier le lit avec le meme parseur YAML que les editeurs (js-yaml, la
+ * dependance deja presente dans node_modules) et affiche la structure telle que
  * Render la verra. Lecture seule, aucune connexion, aucune ecriture.
  */
 import { readFileSync } from 'node:fs';
