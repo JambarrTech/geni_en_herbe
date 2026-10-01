@@ -1,18 +1,18 @@
-# AEERKS — blueprint Render
+﻿# AEERKS â€” blueprint Render
 #
-# UN SEUL SERVICE, ET C'EST DÉLIBÉRÉ
+# UN SEUL SERVICE, ET C'EST DÃ‰LIBÃ‰RÃ‰
 # ===================================
-# Render accorde 750 heures gratuites PAR WORKSPACE ET PAR MOIS, partagées entre
-# tous les services. Quatre services — un par processus, comme dans
-# `docker-compose.yml` — demanderaient 3000 heures : quatre fois le plafond.
+# Render accorde 750 heures gratuites PAR WORKSPACE ET PAR MOIS, partagÃ©es entre
+# tous les services. Quatre services â€” un par processus, comme dans
+# `docker-compose.yml` â€” demanderaient 3000 heures : quatre fois le plafond.
 # Un service unique consomme exactement 750 heures.
 #
-# Les quatre processus (`api`, `ws`, `worker`, `static`) sont donc lancés par
+# Les quatre processus (`api`, `ws`, `worker`, `static`) sont donc lancÃ©s par
 # `backend/src/supervisor.ts`, qui les supervise comme quatre processus de
-# l'OS distincts. L'ISOLATION EST PRÉSERVÉE : un traitement long côté API ne
+# l'OS distincts. L'ISOLATION EST PRÃ‰SERVÃ‰E : un traitement long cÃ´tÃ© API ne
 # peut pas figer la boucle de chrono. Seul `static` ouvre le port public ; il
-# relaie déjà `/api` et `/ws` (cf. `backend/src/server/static.ts`), donc aucun
-# second service n'est nécessaire.
+# relaie dÃ©jÃ  `/api` et `/ws` (cf. `backend/src/server/static.ts`), donc aucun
+# second service n'est nÃ©cessaire.
 #
 # See docs/DEPLOIEMENT-RENDER.md for the step-by-step.
 
@@ -22,61 +22,73 @@ services:
     runtime: docker
     plan: free
 
-    # Le Dockerfile construit déjà les trois applications Vite et installe les
-    # dépendances de production du backend : il n'y a rien à faire avant.
+    # Le Dockerfile construit dÃ©jÃ  les trois applications Vite et installe les
+    # dÃ©pendances de production du backend : il n'y a rien Ã  faire avant.
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    # Le Dockerfile a un ENTRYPOINT (`tini -- npm run`) ; Render fournit la
-    # commande en argument. `start:all` lance le superviseur, qui démarre les
-    # quatre processus.
-    buildCommand: npm run start:all
+    # `dockerCommand`, et NON `buildCommand`.
+    #
+    # Render rÃ©serve `buildCommand` aux runtimes natifs (node, pythonâ€¦) : sur un
+    # service `runtime: docker`, c'est le Dockerfile qui construit, et le champ
+    # qui remplace son `CMD` est `dockerCommand`. Un `buildCommand` ici serait
+    # purement ignorÃ© â€” et laisserait croire qu'une Ã©tape de construction
+    # existe, alors que c'est le Dockerfile qui s'en charge.
+    #
+    # Le `CMD` du Dockerfile est dÃ©jÃ  `start:all`, donc ce champ est
+    # techniquement facultatif. On l'Ã©crit quand mÃªme, pour deux raisons : le superviseur est
+    # l'entrÃ©e du dÃ©ploiement, elle mÃ©rite d'Ãªtre visible dans la configuration
+    # Render et pas seulement dans le Dockerfile ; et un jour oÃ¹ le `CMD` serait
+    # modifiÃ©, Render ne dÃ©marrerait pas le mauvais processus.
+    #
+    # Valeur : ce que Render passe en arguments de l'ENTRYPOINT, qui est
+    # `tini -- npm run`. Donc `npm run start:all`.
+    dockerCommand: start:all
 
-    # Sonde de Render. `/__static_health` est exposée par le processus `static`
-    # et répond avant toute politique de sécurité : une sonde qui dépend de la
+    # Sonde de Render. `/__static_health` est exposÃ©e par le processus `static`
+    # et rÃ©pond avant toute politique de sÃ©curitÃ© : une sonde qui dÃ©pend de la
     # CSP s'effondre au premier durcissement.
     #
-    # Elle ne teste que le processus `static`, pas l'API. C'est délibéré : le
+    # Elle ne teste que le processus `static`, pas l'API. C'est dÃ©libÃ©rÃ© : le
     # relais `/api` est en aval, et une sonde publique qui exigerait la base
-    # ferait échouer le déploiement pour une panne dont Render n'est pas
-    # responsable. La base est vérifiée par l'API elle-même au démarrage
+    # ferait Ã©chouer le dÃ©ploiement pour une panne dont Render n'est pas
+    # responsable. La base est vÃ©rifiÃ©e par l'API elle-mÃªme au dÃ©marrage
     # (`checkDatabaseOnce`), qui journalise une erreur explicite.
     healthCheckPath: /__static_health
 
-    # `PORT` est injecté par Render et vaut généralement 10000. Le superviseur
-    # le transmet à `static` comme `STATIC_PORT`, et le SUPPRIME pour `api`,
-    # `ws` et `worker` — sans quoi l'API tenterait d'écouter sur le port public,
-    # déjà pris, et le conteneur mourrait sur EADDRINUSE.
+    # `PORT` est injectÃ© par Render et vaut gÃ©nÃ©ralement 10000. Le superviseur
+    # le transmet Ã  `static` comme `STATIC_PORT`, et le SUPPRIME pour `api`,
+    # `ws` et `worker` â€” sans quoi l'API tenterait d'Ã©couter sur le port public,
+    # dÃ©jÃ  pris, et le conteneur mourrait sur EADDRINUSE.
     #
-    # Les trois processus privés restent sur 4000/4001/4002 : injoignables de
-    # l'extérieur, ce qui est la disposition de `docker-compose.yml`.
+    # Les trois processus privÃ©s restent sur 4000/4001/4002 : injoignables de
+    # l'extÃ©rieur, ce qui est la disposition de `docker-compose.yml`.
 
-    # Migrations AVANT le démarrage du service.
+    # Migrations AVANT le dÃ©marrage du service.
     #
-    # `drizzle-kit` est une devDependency, volontairement absente de l'image de
-    # production : la cible `migrate` du Dockerfile est faite pour ça. Elle
-    # s'exécute, applique le schéma, puis s'arrête (`restart: "no"`).
+    # Fourni mais DÃ‰SACTIVÃ‰ : les migrations s'appliquent Ã  la main, une fois,
+    # depuis votre machine (`npm run db:migrate`). Voir docs/DEPLOIEMENT-RENDER.md.
     #
-    # C'est un job ponctuel, pas un service permanent : il consomme quelques
-    # secondes d'heures gratuites, une fois par déploiement. Le déclencher
-    # avant le web service garantit que les tables existent quand l'API reçoit
-    # sa première requête — sinon le déploiement paraît réussi puis échoue à la
-    # première connexion.
+    # Pour l'automatiser, deux options : Render n'a pas de type `job`.
+    # Une migration est une TÃ‚CHE PONCTUELLE qui se termine â€” donc `type: cron`
+    # avec un planning, pas `type: worker` (qui reste resident). Le blueprint ci-dessous
+    # est laissÃ© commente parce que `drizzle-kit` est une devDependency absente de
+    # l'image de production : il viserait la cible `migrate` du Dockerfile, qui
+    # instalte les dependances de developpement.
     #
-    # Le job DOIT être déclaré AVANT `aeerks` : Render les exécute dans l'ordre.
+    # Si vous le decommentez, declarez-le AVANT `aeerks` : Render traite les
+    # services dans l'ordre, donc le schema sera pret quand l'API recevra sa
+    # premiere requete.
     #
-    # Décommenter après le PREMIER déploiement réussi, une fois que le compte
-    # admin existe. Un job qui réinitialise le mot de passe à chaque
-    # déploiement est le moyen sûr de se verrouiller dehors à la mise en prod.
-    #
-    # - type: job
-    #   name: aeerks-migrate
-    #   runtime: docker
-    #   dockerfilePath: ./Dockerfile
-    #   dockerContext: .
-    #   dockerCommand: npm run db:migrate
-    #   envVars:
-    #     - key: DATABASE_URL
-    #       sync: false
+    #   - type: cron
+    #     name: aeerks-migrations
+    #     runtime: docker
+    #     schedule: "0 3 1 * *"     # le 1er de chaque mois a 03:00 UTC
+    #     dockerfilePath: ./Dockerfile.migrate
+    #     dockerContext: .
+    #     dockerCommand: db:migrate
+    #     envVars:
+    #       - key: DATABASE_URL
+    #         sync: false
 
     envVars:
       - key: DATABASE_URL
@@ -87,20 +99,30 @@ services:
         value: info
       # `TRUST_PROXY=true` fait lire X-Forwarded-For par req.ip. Sans cela, le
       # rate-limit de connexion se bucketise sur l'IP du proxy : un seul
-      # compteur pour tout le trafic, donc la protection devient inopérante
-      # dès le premier bot.
+      # compteur pour tout le trafic, donc la protection devient inopÃ©rante
+      # dÃ¨s le premier bot.
       - key: TRUST_PROXY
         value: "true"
       # VIDE, et c'est volontaire. Tout est sur une seule origine, donc le
-      # contrôle d'origine des WebSocket laisse passer l'interface. Le
-      # renseigner ici restreindrait l'accès au LAN sans nécessité — voir
+      # contrÃ´le d'origine des WebSocket laisse passer l'interface. Le
+      # renseigner ici restreindrait l'accÃ¨s au LAN sans nÃ©cessitÃ© â€” voir
       # `backend/.env.example`.
       - key: WS_ALLOWED_ORIGINS
         value: ""
 
-      # L'offre gratuite donne 512 Mo. On borne le tas du V8 à 480 Mo pour que
-      # le ramasse-miettes travaille avant que le conteneur soit tué par OOM —
-      # un `SIGKILL` de l'OS ne laisse aucun temps au `shutdown`, donc le
-      # verrou de leader n'est jamais relâché proprement.
-      - key: NODE_OPTIONS
-        value: --max-old-space-size=480
+      # AUCUNE variable NODE_OPTIONS, volontairement.
+      #
+      # J'avais d'abord Ã©crit `--max-old-space-size=480` en pensant Â« 512 Mo
+      # moins une marge Â». C'est faux dÃ¨s que le superviseur tourne : la
+      # variable est hÃ©ritÃ©e par les QUATRE processus enfants, donc 4 Ã— 480 Mo
+      # potentiels pour 512 Mo rÃ©els. Le plafond devient une promesse que le
+      # conteneur ne peut pas tenir, et Node raisonne alors en OOM imminent
+      # bien avant qu'il n'arrive â€” GC agressif, puis mort.
+      #
+      # Le plafond du V8 par dÃ©faut s'ajuste dÃ©jÃ  Ã  la mÃ©moire du conteneur, et
+      # il le fait en tenant compte de ce qui est rÃ©ellement disponible. Une
+      # valeur Ã©crite Ã  la main ne peut que mentir sur ce point.
+      #
+      # Si la mÃ©moire devient un problÃ¨me, le bon levier est `plan:
+      # 0.5c-512mb` (0,5 CPU au lieu de 0,1) ou un plan payant â€” pas un plafond
+      # V8.
