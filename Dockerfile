@@ -4,12 +4,16 @@
 #
 # UNE image, QUATRE points d'entrée : les quatre processus de l'backend
 # (api / ws / worker / static) partagent le même code, ils ne diffèrent que par
-# la commande de démarrage. L'image est donc construite une fois, et chaque
-# service la lance avec son propre `command`.
+# la commande de démarrage. L'image est donc construite une fois.
 #
-#   docker run --rm -p 4000:4000 IMAGE  npm run start:api
-#   docker run --rm -p 4001:4001 IMAGE  npm run start:ws
-#   ...
+#   docker run --rm -p 4000:4000 IMAGE  npm run start:api      # un processus
+#   docker run --rm -p 8080:8080 -e PORT=8080 IMAGE  npm run start:all  # les quatre
+#
+# `start:all` lance le superviseur (`backend/src/supervisor.ts`), qui démarre et
+# surveille les quatre processus dans un seul conteneur. C'est le mode utilisé
+# sur Render, dont les heures gratuites sont partagées à l'échelle du workspace.
+# `start:api` et consorts restent utilisables individuellement — c'est ce que
+# fait `docker-compose.yml`.
 #
 # Pourquoi le backend est-il exécuté via `tsx` et non compilé en JavaScript ?
 # Le code importe ses modules avec l'extension explicite (`./config.ts`), ce que
@@ -123,10 +127,25 @@ USER aeerks
 
 WORKDIR /repo/backend
 
-# Point d'entrée par défaut : l'API. Surchargé par `command:` dans compose.
+# Point d'entrée par défaut : le superviseur.
+#
+# Pourquoi le superviseur et non l'API ? Les quatre processus restent des
+# processus de l'OS distincts (l'isolation est réelle), mais ils partagent un
+# conteneur. C'est ce que permet l'hébergeur retenu : Render accorde 750 heures
+# gratuites PAR WORKSPACE ET PAR MOIS, partagées entre les services — quatre
+# services demanderaient 3000 heures, soit quatre fois le plafond. Un service
+# unique consomme exactement 750 heures.
+#
+# `docker-compose.yml` garde ses quatre services : en développement, la
+# séparation visible et le redémarrage indépendant valent mieux que l'économie
+# d'heures, qui n'a de sens que sur une offre gratuite.
+#
+# Voir `backend/src/supervisor.ts` et docs/DEPLOIEMENT-RENDER.md.
 ENTRYPOINT ["/sbin/tini", "--", "npm", "run"]
-CMD ["start:api"]
+CMD ["start:all"]
 
-# Sonde par défaut cohérente avec CMD. Chaque service la redéfinit.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD wget -qO- "http://127.0.0.1:${API_PORT}/api/health" >/dev/null 2>&1 || exit 1
+# Sonde cohérente avec CMD : le superviseur expose l'état des quatre processus.
+# `HEALTHCHECK` n'est pas utilisé par Render (qui interroge lui-même
+# `healthCheckPath`), mais il reste utile en local et sur une VM.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD wget -qO- "http://127.0.0.1:${STATIC_PORT}/__static_health" >/dev/null 2>&1 || exit 1

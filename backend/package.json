@@ -8,6 +8,7 @@
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "start:api": "tsx src/index.ts",
+    "start:all": "tsx src/supervisor.ts",
     "start:ws": "tsx src/server/ws.ts",
     "start:worker": "tsx src/server/worker.ts",
     "start:static": "tsx src/server/static.ts",

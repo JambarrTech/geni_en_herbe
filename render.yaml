@@ -1,0 +1,106 @@
+# AEERKS — blueprint Render
+#
+# UN SEUL SERVICE, ET C'EST DÉLIBÉRÉ
+# ===================================
+# Render accorde 750 heures gratuites PAR WORKSPACE ET PAR MOIS, partagées entre
+# tous les services. Quatre services — un par processus, comme dans
+# `docker-compose.yml` — demanderaient 3000 heures : quatre fois le plafond.
+# Un service unique consomme exactement 750 heures.
+#
+# Les quatre processus (`api`, `ws`, `worker`, `static`) sont donc lancés par
+# `backend/src/supervisor.ts`, qui les supervise comme quatre processus de
+# l'OS distincts. L'ISOLATION EST PRÉSERVÉE : un traitement long côté API ne
+# peut pas figer la boucle de chrono. Seul `static` ouvre le port public ; il
+# relaie déjà `/api` et `/ws` (cf. `backend/src/server/static.ts`), donc aucun
+# second service n'est nécessaire.
+#
+# See docs/DEPLOIEMENT-RENDER.md for the step-by-step.
+
+services:
+  - type: web
+    name: aeerks
+    runtime: docker
+    plan: free
+
+    # Le Dockerfile construit déjà les trois applications Vite et installe les
+    # dépendances de production du backend : il n'y a rien à faire avant.
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    # Le Dockerfile a un ENTRYPOINT (`tini -- npm run`) ; Render fournit la
+    # commande en argument. `start:all` lance le superviseur, qui démarre les
+    # quatre processus.
+    buildCommand: npm run start:all
+
+    # Sonde de Render. `/__static_health` est exposée par le processus `static`
+    # et répond avant toute politique de sécurité : une sonde qui dépend de la
+    # CSP s'effondre au premier durcissement.
+    #
+    # Elle ne teste que le processus `static`, pas l'API. C'est délibéré : le
+    # relais `/api` est en aval, et une sonde publique qui exigerait la base
+    # ferait échouer le déploiement pour une panne dont Render n'est pas
+    # responsable. La base est vérifiée par l'API elle-même au démarrage
+    # (`checkDatabaseOnce`), qui journalise une erreur explicite.
+    healthCheckPath: /__static_health
+
+    # `PORT` est injecté par Render et vaut généralement 10000. Le superviseur
+    # le transmet à `static` comme `STATIC_PORT`, et le SUPPRIME pour `api`,
+    # `ws` et `worker` — sans quoi l'API tenterait d'écouter sur le port public,
+    # déjà pris, et le conteneur mourrait sur EADDRINUSE.
+    #
+    # Les trois processus privés restent sur 4000/4001/4002 : injoignables de
+    # l'extérieur, ce qui est la disposition de `docker-compose.yml`.
+
+    # Migrations AVANT le démarrage du service.
+    #
+    # `drizzle-kit` est une devDependency, volontairement absente de l'image de
+    # production : la cible `migrate` du Dockerfile est faite pour ça. Elle
+    # s'exécute, applique le schéma, puis s'arrête (`restart: "no"`).
+    #
+    # C'est un job ponctuel, pas un service permanent : il consomme quelques
+    # secondes d'heures gratuites, une fois par déploiement. Le déclencher
+    # avant le web service garantit que les tables existent quand l'API reçoit
+    # sa première requête — sinon le déploiement paraît réussi puis échoue à la
+    # première connexion.
+    #
+    # Le job DOIT être déclaré AVANT `aeerks` : Render les exécute dans l'ordre.
+    #
+    # Décommenter après le PREMIER déploiement réussi, une fois que le compte
+    # admin existe. Un job qui réinitialise le mot de passe à chaque
+    # déploiement est le moyen sûr de se verrouiller dehors à la mise en prod.
+    #
+    # - type: job
+    #   name: aeerks-migrate
+    #   runtime: docker
+    #   dockerfilePath: ./Dockerfile
+    #   dockerContext: .
+    #   dockerCommand: npm run db:migrate
+    #   envVars:
+    #     - key: DATABASE_URL
+    #       sync: false
+
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: NODE_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      # `TRUST_PROXY=true` fait lire X-Forwarded-For par req.ip. Sans cela, le
+      # rate-limit de connexion se bucketise sur l'IP du proxy : un seul
+      # compteur pour tout le trafic, donc la protection devient inopérante
+      # dès le premier bot.
+      - key: TRUST_PROXY
+        value: "true"
+      # VIDE, et c'est volontaire. Tout est sur une seule origine, donc le
+      # contrôle d'origine des WebSocket laisse passer l'interface. Le
+      # renseigner ici restreindrait l'accès au LAN sans nécessité — voir
+      # `backend/.env.example`.
+      - key: WS_ALLOWED_ORIGINS
+        value: ""
+
+      # L'offre gratuite donne 512 Mo. On borne le tas du V8 à 480 Mo pour que
+      # le ramasse-miettes travaille avant que le conteneur soit tué par OOM —
+      # un `SIGKILL` de l'OS ne laisse aucun temps au `shutdown`, donc le
+      # verrou de leader n'est jamais relâché proprement.
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=480
