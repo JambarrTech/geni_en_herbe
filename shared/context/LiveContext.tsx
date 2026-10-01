@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import type { LiveStatePayload } from '../types.ts';
 import { APP_CONFIG } from '../lib/config.ts';
 import { api, getStoredToken, isAbort } from '../lib/api.ts';
+import { resolveWsUrl } from '../lib/wsUrl.ts';
 
 interface LiveContextType {
   liveState: LiveStatePayload | null;
@@ -65,13 +66,19 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     function connect() {
       if (disposed) return;
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       // Jeton transmis : le serveur peut alors distinguer un client staff
       // authentifié du flux public. (Absent => flux public, inchangé.)
       const token = getStoredToken();
-      const wsUrl = token
-        ? `${protocol}//${window.location.host}/ws?token=${encodeURIComponent(token)}`
-        : `${protocol}//${window.location.host}/ws`;
+      // Par défaut le socket suit l'origine de la page (auto-hébergement, le
+      // processus `static` relaie `/ws`). `VITE_WS_URL` ne sert que lorsque
+      // l'interface est déployée ailleurs que l'API — le CDN ne relaie pas de
+      // WebSocket. Le calcul est isolé et éprouvé dans `lib/wsUrl.ts`.
+      const wsUrl = resolveWsUrl({
+        host: window.location.host,
+        protocol: window.location.protocol,
+        token,
+        override: import.meta.env.VITE_WS_URL,
+      });
 
       ws = new WebSocket(wsUrl);
 

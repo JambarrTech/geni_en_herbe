@@ -24,6 +24,7 @@ import { scoreLimit, controlLimit, adminWriteLimit } from '../middleware/rateLim
 import { CONFIG, FLOW } from '../config.ts';
 import { validateIds } from '../lib/validate.ts';
 import { createLogger } from '../lib/logger.ts';
+import { buildMatchList, parseOptions, winnerTeamIdOf } from '../lib/matchList.ts';
 
 const log = createLogger('api');
 
@@ -34,27 +35,10 @@ export const matchesRouter = Router();
 // qui partait en requete SQL et revenait en 404 trompeur ou en 500.
 validateIds(matchesRouter);
 
-function winnerTeamIdOf(m: { teamAId: number; teamBId: number; scoreA: number; scoreB: number }): number | null {
-  if (m.scoreA > m.scoreB) return m.teamAId;
-  if (m.scoreB > m.scoreA) return m.teamBId;
-  return null;
-}
-
-function parseOptions(raw: string | null | undefined): string[] | null {
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : null;
-  } catch {
-    log.warn('options question mal formées (JSON invalide)', { apercu: raw.slice(0, 80) });
-    return null;
-  }
-}
-
 matchesRouter.get('/', requireAuth, requireJuryOrAdmin, async (_req: AuthRequest, res: Response) => {
   try {
     // Projections explicites : on ne charge plus la table `users` au complet
-    // (et ses empreintes de mots de passe) pourenu seul mapping id -> nom.
+    // (et ses empreintes de mots de passe) pour un seul mapping id -> nom.
     const allMatches = await db
       .select({
         id: matches.id,
@@ -89,18 +73,8 @@ matchesRouter.get('/', requireAuth, requireJuryOrAdmin, async (_req: AuthRequest
       .from(teams);
     const allUsers = await db.select({ id: users.id, name: users.name }).from(users);
 
-    const teamMap = new Map(allTeams.map((t) => [t.id, t]));
-    const userMap = new Map(allUsers.map((u) => [u.id, u.name]));
-
-    const populated = allMatches.map((m) => ({
-      ...m,
-      winnerTeamId: winnerTeamIdOf(m),
-      teamA: teamMap.get(m.teamAId) ?? null,
-      teamB: teamMap.get(m.teamBId) ?? null,
-      juryName: m.juryId ? userMap.get(m.juryId) ?? null : null,
-    }));
-
-    res.json(populated);
+    // Les jointures sont faites ici plutôt qu'en SQL : voir `lib/matchList.ts`.
+    res.json(buildMatchList(allMatches, allTeams, allUsers));
   } catch (error: any) {
     res.status(500).json({ error: 'Impossible de charger les matchs' });
   }

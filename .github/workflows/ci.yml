@@ -1,9 +1,11 @@
 name: CI
 
-# Le pipeline reproduit exactement les quatre vérifications lancées en local
-# (`npm run lint`, `npm run typecheck`, `npm test`, `npm run build`). Rien
+# Le pipeline reproduit les vérifications lancées en local (`npm run lint`,
+# `npm run typecheck`, `npm test`, `npm run build`) plus les deux contrôles que
+# `build` n'exécute pas (`npm run verify:coverage`, sonde de concurrence). Rien
 # d'autre n'est ajouté : une vérification qui ne tourne pas localement ne doit
-# pas non plus tourner en CI, sinon elle devient un faux signal de sécurité.
+# pas non plus tourner en CI, sinon elle devient un faux signal de sécurité —
+# et réciproquement, un contrôle qui n'existe qu'en local n'existe pas.
 
 on:
   push:
@@ -53,6 +55,14 @@ jobs:
       - name: Tests
         run: npm test
 
+      # Contrôle du contrôle : `verify:coverage` s'assure que l'extracteur de
+      # classes vu par `verify-build-output.mjs` voit bien TOUTES les écritures
+      # de classe des sources. Sans lui, un extracteur devenu aveugle ferait
+      # passer le build en ne comparant qu'un sous-ensemble : le vérificateur
+      # serait vert en n'ayant rien vérifié.
+      - name: Couverture du vérificateur de CSS
+        run: npm run verify:coverage
+
       # `npm run build` inclut déjà la vérification du CSS produit
       # (scripts/verify-build-output.mjs) : le build échoue si une classe
       # Tailwind utilisée n'a produit aucune règle. C'est la régression où
@@ -63,9 +73,14 @@ jobs:
 
       # L'état ESLint est publié hors du rapport : la console ne montre que
       # l'essentiel, le détail complet va dans l'artefact.
+      #
+      # La liste des cibles n'est PAS recopiée ici : `npm run lint -- --format
+      # json` réutilise exactement le script local (`tests` compris). Deux
+      # listes écrites en dur auraient fini par diverger, et l'artefact aurait
+      # silencieusement cessé de couvrir `tests/`.
       - name: Publier le rapport ESLint
         if: always()
-        run: npx eslint apps/live/src apps/jury/src apps/admin/src shared backend/src --format json > eslint-report.json || true
+        run: npm run lint -- --format json > eslint-report.json || true
 
       - uses: actions/upload-artifact@v4
         if: always()

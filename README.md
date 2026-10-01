@@ -175,7 +175,7 @@ le code mort échoue à la compilation plutôt que de s'accumuler.
 
   Le contrôle d'accès aux écrans (`/`, `/jury`, `/admin`) repose donc
   uniquement sur le jeton de session émis par `POST /api/auth/login`
-  (voir [ADR-0004](docs/adr/0004-sessions-externalisees.md)).
+  (voir [ADR-0001](docs/adr/ADR-0001-sessions.md)).
 - **Sessions** : stockées en table `sessions`, pas en mémoire du processus.
   Le jeton n'est jamais stocké en clair — seule son empreinte SHA-256 l'est.
   Conséquences directes : un redémarrage ou un déploiement ne déconnecte plus

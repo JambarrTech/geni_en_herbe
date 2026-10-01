@@ -6,6 +6,13 @@ import { APP_CONFIG } from '@shared/lib/config.ts';
 import { api, errorMessage, isAbort } from '@shared/lib/api.ts';
 import { Modal } from '@shared/components/Modal.tsx';
 import {
+  SCORE_REASONS,
+  hasModifier,
+  isTypingTarget,
+  resolveNavShortcut,
+  resolveScoreShortcut,
+} from '../lib/juryShortcuts.ts';
+import {
   Play,
   Pause,
   RotateCcw,
@@ -424,73 +431,42 @@ export const JuryDashboard: React.FC = () => {
   /**
    * Raccourcis clavier.
    *
-   * Attribuer un point est l'action la plus répétée de toute la plateforme, et
-   * elle reposait uniquement sur le clic. Un membre du jury qui doit valider
-   * plusieurs réponses d'affilée perd du temps à viser des boutons, et reste
-   * bloqué s'il manie mal la souris sous pression. D'où les raccourcis, qui ne
-   * s'activent que si le focus n'est pas dans un champ de saisie.
+   * La traduction touche -> action vit dans `lib/juryShortcuts.ts` (pure, donc
+   * éprouvable sans monter l'écran ni la connexion WebSocket). Ce bloc ne
+   * s'occupe plus que du câblage DOM : écouter, filtrer, traduire, agir.
    */
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      // Ne jamais capter une frappe destinée à un champ de saisie.
-      const target = e.target as HTMLElement | null;
-      if (
-        target &&
-        (target.tagName === 'INPUT' ||
-          target.tagName === 'TEXTAREA' ||
-          target.tagName === 'SELECT' ||
-          target.isContentEditable)
-      ) {
-        return;
-      }
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      // Ne jamais capter une frappe destinée à un champ de saisie : le motif
+      // d'ajustement contient des lettres qui sont aussi des raccourcis.
+      if (isTypingTarget(e.target as HTMLElement | null)) return;
+      if (hasModifier(e)) return;
       if (!matchDetails) return;
 
-      const A = matchDetails.teamAId;
-      const B = matchDetails.teamBId;
-      const pts = currentQ?.points || APP_CONFIG.DEFAULT_QUESTION_POINTS;
+      const outcome = resolveScoreShortcut(e.key, {
+        teamAId: matchDetails.teamAId,
+        teamBId: matchDetails.teamBId,
+        questionPoints: currentQ?.points || APP_CONFIG.DEFAULT_QUESTION_POINTS,
+        bonusPoints: APP_CONFIG.BONUS_POINTS,
+      });
+      if (outcome) {
+        // Le verrou est testé après la traduction : `canScore` dépend de
+        // `actionLoading`, donc le lire ici évite de le figer dans les
+        // dépendances de l'effet juste pour ce test.
+        if (canScore) {
+          handleScore(outcome.teamId, outcome.points, outcome.type, outcome.reason);
+        }
+        return;
+      }
 
-      switch (e.key) {
-        case 'a':
-        case 'A':
-          if (canScore) handleScore(A, pts, 'ANSWER', `Bonne réponse directe (${pts} pts)`);
-          break;
-        case 'e':
-        case 'E':
-          if (canScore) handleScore(B, pts, 'ANSWER', `Bonne réponse directe (${pts} pts)`);
-          break;
-        case '1':
-          if (canScore) {
-            handleScore(A, APP_CONFIG.BONUS_POINTS, 'BONUS', `Points Bonus (+${APP_CONFIG.BONUS_POINTS} pts)`);
-          }
-          break;
-        case '2':
-          if (canScore) {
-            handleScore(B, APP_CONFIG.BONUS_POINTS, 'BONUS', `Points Bonus (+${APP_CONFIG.BONUS_POINTS} pts)`);
-          }
-          break;
-        case 'z':
-        case 'Z':
-          if (canScore) handleScore(A, 0, 'PENALTY', 'Réponse erronée (0 pt)');
-          break;
-        case 's':
-        case 'S':
-          if (canScore) handleScore(B, 0, 'PENALTY', 'Réponse erronée (0 pt)');
-          break;
-        case 'ArrowRight':
-          if (currentIdx < matchQuestionsList.length - 1 && !actionLoading) {
-            e.preventDefault();
-            handleNextQuestion();
-          }
-          break;
-        case 'ArrowLeft':
-          if (currentIdx > 0 && !actionLoading) {
-            e.preventDefault();
-            handlePrevQuestion();
-          }
-          break;
-        default:
-          return;
+      const nav = resolveNavShortcut(e.key, {
+        currentIndex: currentIdx,
+        questionCount: matchQuestionsList.length,
+      });
+      if (nav && !actionLoading) {
+        e.preventDefault();
+        if (nav === 'next') handleNextQuestion();
+        else handlePrevQuestion();
       }
     }
 
@@ -640,7 +616,7 @@ export const JuryDashboard: React.FC = () => {
                         matchDetails.teamAId,
                         currentPoints,
                         'ANSWER',
-                        `Bonne réponse directe (${currentPoints} pts)`
+                        SCORE_REASONS.answer(currentPoints)
                       )
                     }
                     className="w-full py-3 px-4 rounded-xl bg-[#0B3B82] hover:bg-[#2563EB] active:scale-[0.98] text-white font-bold text-sm shadow-md flex items-center justify-center gap-2 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
@@ -659,7 +635,7 @@ export const JuryDashboard: React.FC = () => {
                           matchDetails.teamAId,
                           APP_CONFIG.BONUS_POINTS,
                           'BONUS',
-                          `Points Bonus (+${APP_CONFIG.BONUS_POINTS} pts)`
+                          SCORE_REASONS.bonus(APP_CONFIG.BONUS_POINTS)
                         )
                       }
                       className="py-2 px-3 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900 font-semibold text-xs flex items-center justify-center gap-1.5 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
@@ -675,7 +651,7 @@ export const JuryDashboard: React.FC = () => {
                           matchDetails.teamAId,
                           0,
                           'PENALTY',
-                          'Réponse erronée (0 pt)'
+                          SCORE_REASONS.penalty()
                         )
                       }
                       className="py-2 px-3 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 font-semibold text-xs flex items-center justify-center gap-1.5 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
@@ -867,7 +843,7 @@ export const JuryDashboard: React.FC = () => {
                         matchDetails.teamBId,
                         currentPoints,
                         'ANSWER',
-                        `Bonne réponse directe (${currentPoints} pts)`
+                        SCORE_REASONS.answer(currentPoints)
                       )
                     }
                     className="w-full py-3 px-4 rounded-xl bg-[#0B3B82] hover:bg-[#2563EB] active:scale-[0.98] text-white font-bold text-sm shadow-md flex items-center justify-center gap-2 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
@@ -886,7 +862,7 @@ export const JuryDashboard: React.FC = () => {
                           matchDetails.teamBId,
                           APP_CONFIG.BONUS_POINTS,
                           'BONUS',
-                          `Points Bonus (+${APP_CONFIG.BONUS_POINTS} pts)`
+                          SCORE_REASONS.bonus(APP_CONFIG.BONUS_POINTS)
                         )
                       }
                       className="py-2 px-3 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900 font-semibold text-xs flex items-center justify-center gap-1.5 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
@@ -902,7 +878,7 @@ export const JuryDashboard: React.FC = () => {
                           matchDetails.teamBId,
                           0,
                           'PENALTY',
-                          'Réponse erronée (0 pt)'
+                          SCORE_REASONS.penalty()
                         )
                       }
                       className="py-2 px-3 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 font-semibold text-xs flex items-center justify-center gap-1.5 transition-all disabled:opacity-40 disabled:cursor-not-allowed"

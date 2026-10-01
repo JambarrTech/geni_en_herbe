@@ -6,6 +6,7 @@ import { subscribe, type BusEvent } from './pubsub.ts';
 import { CONFIG } from '../config.ts';
 import { createLogger } from '../lib/logger.ts';
 import { metrics, renderMetrics } from '../lib/metrics.ts';
+import { checkWebSocketOrigin, parseAllowedOrigins } from '../lib/wsOrigin.ts';
 
 const log = createLogger('ws');
 
@@ -67,6 +68,39 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocketServer({
   server,
   maxPayload: CONFIG.WS_MAX_PAYLOAD_BYTES,
+  // Origine contrôlée AVANT la poignée de main.
+  //
+  // Le refus doit survenir ici, et pas dans `connection` : une connexion
+  // acceptée puis fermée immédiatement se voit comme un succès par le client,
+  // qui se reconnecte — boucle de reconnexion sur une origine legitimately
+  // refusée, saturation du serveur et bruit dans les journaux. En amont, le
+  // navigateur reçoit un refus net et ne retente pas.
+  //
+  // `verifyClient` est marqué déprécié par la bibliothèque `ws` au profit d'un
+  // `upgrade` manuel, mais il reste le seul moyen de refuser avant la
+  // poignée de main sans réécrire le câblage HTTP de ce processus. Le
+  // déprécié est ici un détail de bibliothèque ; la réécriture, non.
+  // Le type est ecrit explicitement : la declaration de la bibliotheque expose
+  // un union (sync / async) que l'inference ne resout pas, ce qui laisse les
+  // parametres en `any` implicite.
+  verifyClient: ({ origin, req }: { origin: string | undefined; req: http.IncomingMessage }) => {
+    const decision = checkWebSocketOrigin(
+      origin,
+      parseAllowedOrigins(process.env.WS_ALLOWED_ORIGINS),
+      req.headers.host
+    );
+    if (!decision.allowed) {
+      // Journalisé : un refus d'origine est une tentative d'accès, pas un bruit.
+      // Le compteur reste à zéro, ce qui alarme plus qu'un compteur
+      // d'erreurs techniques.
+      log.warn('Connexion WebSocket refusée', {
+        origin: decision.origin,
+        raison: decision.reason,
+      });
+      metrics.wsOriginRejected.inc();
+    }
+    return decision.allowed;
+  },
 });
 
 wss.on('error', (err) => log.error('Erreur WebSocketServer', { err }));

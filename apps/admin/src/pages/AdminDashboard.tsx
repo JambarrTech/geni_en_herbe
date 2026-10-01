@@ -31,6 +31,7 @@ import {
   UserPlus,
 } from 'lucide-react';
 import { UsersManager } from '../components/UsersManager.tsx';
+import { pickCurrentEvent } from '../lib/currentEvent.ts';
 
 // Onglets réellement implémentés. 'events' et 'scores' figuraient dans l'union
 // mais n'avaient aucune branche de rendu : deux valeurs inatteignables.
@@ -55,7 +56,7 @@ interface AdminTabDef {
 /**
  * Barème de navigation. Le rendu est isolé dans le composant : auparavant les
  * 8 boutons étaient écrits en dur dans le JSX, chacun dupliquant ses classes
- * de style actif, ce qui rendait toute evolution visuelle_fastidieuse.
+ * de style actif, ce qui rendait toute évolution visuelle fastidieuse.
  */
 const TAB_DEFS: AdminTabDef[] = [
   { id: 'overview', label: 'Aperçu & Pilotage', Icon: LayoutDashboard },
@@ -226,15 +227,12 @@ export const AdminDashboard: React.FC = () => {
   }, [fetchData]);
 
   // Publication of results (Section 24)
-  // Événement "courant" : l'événement actif le plus plausible, sinon le plus récent
-  const currentEvent = useMemo<EventItem | null>(() => {
-    if (!Array.isArray(eventsList) || eventsList.length === 0) return null;
-    return (
-      eventsList.find((e) =>
-        ['READY', 'RUNNING', 'PAUSED', 'REGISTRATION'].includes(e?.status)
-      ) ?? eventsList.slice().sort((a, b) => (b?.id ?? 0) - (a?.id ?? 0))[0]
-    );
-  }, [eventsList]);
+  // Événement « courant » : l'événement actif le plus plausible, sinon le plus
+  // récent. La règle vit dans `lib/currentEvent.ts` pour être éprouvable seule.
+  const currentEvent = useMemo<EventItem | null>(
+    () => pickCurrentEvent(eventsList),
+    [eventsList]
+  );
 
   const handlePublishResults = async () => {
     if (!currentEvent) {
@@ -242,7 +240,7 @@ export const AdminDashboard: React.FC = () => {
       return;
     }
     // La confirmation est portée par un dialogue de l'application, pas par
-    // `window.confirm` : elle affiche le nombre de matchs concerned et le
+    // `window.confirm` : elle affiche le nombre de matchs concernés et le
     // caractère officiel de l'acte. Publier un podium est un acte
     // institutionnel, pas un réglage.
     setConfirmPublish(true);

@@ -311,6 +311,12 @@ export const metrics = {
     'aeerks_ws_backpressure_drops_total',
     'Clients deconnectes pour file d\'envoi saturée (contre-pression)'
   ),
+  // Un compteur, et non une jauge : un refus d'origine est un evenement
+  // ponctuel, et un total nul n'a pas de « moment present » a surveiller.
+  wsOriginRejected: new Counter(
+    'aeerks_ws_origin_rejected_total',
+    'Connexions WebSocket refusees a la poignee de main, par raison'
+  ),
   busPublished: new Counter('aeerks_bus_published_total', 'Evenements publies sur le bus'),
   busErrors: new Counter('aeerks_bus_errors_total', 'Echecs de publication sur le bus'),
   sessionsActive: new Gauge('aeerks_sessions_active', 'Sessions ouvertes'),
@@ -356,6 +362,7 @@ export function renderMetrics(service: string, extraGauges: Record<string, () =>
     ...metrics.wsClients.render(),
     ...metrics.wsMessages.render(),
     ...metrics.wsBackpressureDrops.render(),
+    ...metrics.wsOriginRejected.render(),
     ...metrics.busPublished.render(),
     ...metrics.busErrors.render(),
     ...metrics.sessionsActive.render(),
