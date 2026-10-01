@@ -24,7 +24,6 @@
     "dotenv": "^17.2.3",
     "drizzle-orm": "https://registry.npmjs.org/drizzle-orm/-/drizzle-orm-0.45.2.tgz",
     "express": "^4.21.2",
-    "firebase-admin": "^14.4.0",
     "http-proxy": "^1.18.1",
     "pg": "^8.23.0",
     "ws": "^8.21.3"

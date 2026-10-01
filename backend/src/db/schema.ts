@@ -260,6 +260,53 @@ export const competitionSettings = pgTable('competition_settings', {
   description: text('description'),
 });
 
+// 13. Sessions (table)
+//     Les sessions vivaient dans un Map mémoire du processus API. Deux
+//     conséquences, toutes deux annoncees lors d'incidents reels :
+//       - un redemarrage, un deploiement ou un worker qui bascule invalide
+//         toutes les sessions : le jury doit se reconnecter en pleine
+//         competition, sur plusieurs dizaines de postes ;
+//       - rien n'est partage entre les instances, donc le deploiement
+//         horizontal exige un sticky session, ce qui rend le processus API
+//         lui-meme non remplacable.
+//     La table supprime les deux contraintes : l'etat est dans PostgreSQL,
+//     deja partage, deja sauvegarde, deja repliqueable.
+//     CHOLEUR CENTRALE : on stocke l'EMPREINTE du jeton, jamais le jeton.
+//     Une lecture de la table (sauvegarde, dump, journal SQL, attaquant
+//     ayant obtenu un acces en lecture) ne doit pas pouvoir se transformer en
+//     sessions volables. Le client detient le jeton ; la base ne detient que
+//     ce qui permet de le recomparer.
+export const sessions = pgTable(
+  'sessions',
+  {
+    // hex(sha256(jeton)) : index unique, et le seul moyen de retrouver la
+    // ligne d'un jeton presente.
+    tokenHash: text('token_hash').notNull().unique(),
+    userId: integer('user_id')
+      .references(() => users.id, { onDelete: 'cascade' })
+      .notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    // Recherche de la ligne par jeton : filtre sur expires_at.
+    expiresAt: timestamp('expires_at').notNull(),
+    // Dernier usage observe. Sert a la purge (inactivite) et au diagnostic
+    // (« cette session est-elle encore utilisee ? »).
+    lastSeenAt: timestamp('last_seen_at').defaultNow().notNull(),
+    // Contexte de connexion, pour l'audit : des sessions orphelines se
+    // diagnostiquent bien mieux avec une adresse et un user-agent.
+    ip: text('ip'),
+    userAgent: text('user_agent'),
+  },
+  (t) => [
+    // Verification d'un jeton : lecture par token_hash (unique, donc deja
+    // indexe) — pas besoin d'un second index.
+    // Purge periodique : balayage des sessions echues.
+    index('sessions_expires_at_idx').on(t.expiresAt),
+    // Revocation d'un coup de toutes les sessions d'un compte (desactivation,
+    // retrogradation, suppression).
+    index('sessions_user_id_idx').on(t.userId),
+  ]
+);
+
 // Relations
 export const eventsRelations = relations(events, ({ many }) => ({
   teams: many(teams),

@@ -151,7 +151,10 @@ usersRouter.patch('/:id', requireAuth, requireAdmin, adminWriteLimit, async (req
     // Les droits ont changé : les sessions déjà ouvertes ne doivent pas survivre,
     // sinon l'utilisateur conserve le rôle précédent jusqu'à l'expiration du jeton.
     if (active === false || (role && role !== target.role)) {
-      const revoked = revokeAllSessionsForUser(id);
+      // `await` obligatoire : la revocation doit etre acquise AVANT la
+      // reponse. Sans elle, un administrateur qui desactive un compte verrait
+      // l'acces survivre au 200 pendant le temps du DELETE.
+      const revoked = await revokeAllSessionsForUser(id);
       if (revoked > 0) {
         log.info('Sessions révoquées après changement de droits', {
           utilisateur: id,
@@ -233,7 +236,12 @@ usersRouter.delete('/:id', requireAuth, requireAdmin, adminWriteLimit, async (re
     }
 
     await db.delete(users).where(eq(users.id, id));
-    revokeAllSessionsForUser(id);
+    // Redondant en apparence — la FK `sessions.user_id` est en CASCADE, la
+    // suppression du compte emporte donc ses sessions. L'appel reste neanmoins
+    // explicite : il vide aussi le cache memoire, ce que la cascade ne fait
+    // pas. Sans lui, un compte supprime resterait authentifie jusqu'a
+    // l'expiration de l'entree de cache.
+    await revokeAllSessionsForUser(id);
 
     await logAudit(
       req.user?.uid,

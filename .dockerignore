@@ -15,7 +15,6 @@ node_modules
 .env
 .env.*
 backend/.env
-firebase-applet-config.json
 
 # Sources de versionnement et fichiers de travail
 .git
@@ -35,4 +34,5 @@ backend/drizzle/meta/_journal.json.tmp
 # Documentation et fichiers non nécessaires à l'exécution
 *.md
 !README.md
+# Artefacts d'outils de génération, sans rôle en fonctionnement
 metadata.json

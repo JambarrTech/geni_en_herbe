@@ -162,15 +162,24 @@ le code mort échoue à la compilation plutôt que de s'accumuler.
   production. Derrière un reverse proxy, positionnez `TRUST_PROXY=1` sinon le
   rate-limit de connexion se bucketise sur l'IP du proxy.
 - **Authentification** : la connexion se fait **exclusivement par email + mot de passe**.
-  L'interface n'expose plus de connexion Google, et le SDK `firebase` a été retiré
-  du front (dépendance, chunk de ~235 Ko, `shared/lib/firebase.ts`).
+  Firebase a été retiré des deux côtés : le SDK client (dépendance, chunk de
+  ~235 Ko, `shared/lib/firebase.ts`) comme le SDK serveur (`firebase-admin`).
 
-  Le **chemin serveur** reste en place : `backend/src/middleware/auth.ts` sait
-  toujours valider un jeton Firebase ID et provisionner un compte
-  (premier compte ou domaine `CONFIG.ORG_EMAIL_DOMAINS` ⇒ rôle `ADMIN`).
-  Aucun client ne peut plus en produire un, donc ce chemin est inatteignable en
-  l'état — c'est un point à trancher si vous voulez le retirer
-  (voir § Points en suspens).
+  Le chemin serveur supprimé n'était pas seulement mort, il était **faux** :
+  `verifyIdToken` ne valide que les jetons émis par *ce* projet Firebase, alors
+  que l'initialisation ne passait que `projectId`. Les deux paramètres n'ont
+  aucun sens sans fichier de comptes de service : aucun jeton externe n'aurait
+  jamais été accepté, et le code de provisionnement automatique des comptes
+  Google n'aurait jamais pu s'exécuter. C'était du code qui avait l'air de
+  fonctionner — le pire état possible pour une garde d'accès.
+
+  Le contrôle d'accès aux écrans (`/`, `/jury`, `/admin`) repose donc
+  uniquement sur le jeton de session émis par `POST /api/auth/login`
+  (voir [ADR-0004](docs/adr/0004-sessions-externalisees.md)).
+- **Sessions** : stockées en table `sessions`, pas en mémoire du processus.
+  Le jeton n'est jamais stocké en clair — seule son empreinte SHA-256 l'est.
+  Conséquences directes : un redémarrage ou un déploiement ne déconnecte plus
+  le jury, et l'API peut être déployée à l'échelle sans sessions collantes.
 
 ## Notes
 
@@ -182,5 +191,3 @@ le code mort échoue à la compilation plutôt que de s'accumuler.
   Certaines règles restent surchargeables en base via `competition_settings`.
 - `lucide-react` est isolé dans un chunk séparé, hors du HTML initial, donc hors
   du chemin critique de rendu.
-- `metadata.json` est un artefact de l'outil qui a généré le projet et ne sert à rien
-  en fonctionnement ; il peut être supprimé.

@@ -1,5 +1,4 @@
 import { Router, type Request, type Response } from 'express';
-import { randomBytes } from 'crypto';
 import { db } from '../db/index.ts';
 import { users } from '../db/schema.ts';
 import { eq } from 'drizzle-orm';
@@ -131,8 +130,6 @@ authRouter.post('/login', async (req: Request, res: Response) => {
     resetAttempts(key);
     loginIpFailures.reset(ipKey);
 
-    // Generate session token (cryptographiquement aléatoire)
-    const token = `${CONFIG.TOKEN_PREFIX}${randomBytes(32).toString('base64url')}`;
     const userProfile = {
       id: user.id,
       uid: user.uid,
@@ -142,7 +139,12 @@ authRouter.post('/login', async (req: Request, res: Response) => {
       active: user.active,
     };
 
-    registerSessionToken(token, userProfile);
+    // La session est enregistree en base et le jeton genere ici : le jeton en
+    // clair n'est renvoye qu'ici, jamais stocke. Voir lib/sessions.ts.
+    const token = await registerSessionToken(userProfile, {
+      ip,
+      userAgent: req.get('user-agent'),
+    });
 
     await logAudit(
       user.uid,
@@ -167,13 +169,18 @@ authRouter.get('/me', requireAuth, (req: AuthRequest, res: Response) => {
   res.json({ user: req.user });
 });
 
-authRouter.post('/logout', requireAuth, (req: AuthRequest, res: Response) => {
+authRouter.post('/logout', requireAuth, async (req: AuthRequest, res: Response) => {
   try {
     const authHeader = req.headers.authorization ?? '';
     const token = authHeader.split('Bearer ')[1]?.trim();
-    if (token) revokeSessionToken(token);
+    // La reponse est attendue : c'est elle qui garantit au client que la
+    // session est fermee cote serveur. Repondre avant l'ecriture laisserait
+    // une fenetre ou le jeton reste valide alors que l'interface affiche
+    // « deconnecte » — et l'utilisateur ne pourrait plus le signaler.
+    if (token) await revokeSessionToken(token);
     res.json({ success: true });
   } catch (error: any) {
+    log.error('Erreur de déconnexion', { err: error });
     res.status(500).json({ error: 'Erreur de déconnexion' });
   }
 });
