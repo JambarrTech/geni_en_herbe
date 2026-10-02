@@ -129,3 +129,39 @@ Object.defineProperty(window, 'AudioContext', {
   writable: true,
   value: SilentAudioContext,
 });
+
+// ---------------------------------------------------------------------------
+// Boîte de dialogue <dialog>
+// ---------------------------------------------------------------------------
+// jsdom 30 connaît `HTMLDialogElement` et la propriété `open`, mais N'IMPLÉMENTE
+// NI `showModal()` NI `close()`. Le composant `ConfirmDialog` repose sur les
+// deux.
+//
+// La conséquence était invisible jusqu'ici : AUCUN test du projet ne pouvait
+// ouvrir une boîte de confirmation. Les deux actes les plus engageants de
+// l'application — publier officiellement les résultats, supprimer un match —
+// n'étaient donc jamais exercés, alors qu'ils passent tous deux par ce
+// composant. Le défaut n'est pas apparu tout seul : il a fallu écrire les tests
+// de suppression de match pour le rencontrer.
+//
+// `close()` émet l'événement `close`, comme le vrai. Ce n'est pas un détail :
+// `ConfirmDialog` s'y abonne, et c'est sa SEULE voie de sortie pour la touche
+// Échap. Une doublure muette laisserait ce dialogue ouvert et désynchronisé
+// d'un clic sur « Annuler » — exactement le piège que le commentaire dudit
+// composant décrit.
+const DialoguePrototype = window.HTMLDialogElement.prototype as unknown as {
+  showModal?: () => void;
+  close?: () => void;
+};
+
+if (typeof DialoguePrototype.showModal !== 'function') {
+  DialoguePrototype.showModal = function showModal(this: HTMLDialogElement) {
+    this.setAttribute('open', '');
+  };
+
+  DialoguePrototype.close = function close(this: HTMLDialogElement) {
+    if (!this.hasAttribute('open')) return;
+    this.removeAttribute('open');
+    this.dispatchEvent(new Event('close'));
+  };
+}
