@@ -36,68 +36,47 @@
  * chaque reference d'asset existe reellement sur le disque. Un deploiement qui
  * aboutirait a trois pages blanches echoue donc au build, pas a l'usage.
  */
+import { readFileSync } from 'node:fs';
 import { cp, mkdir, readFile, readdir, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readBackendOverride, resolveBackendOrigin } from './vercel-backend.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const OUT = path.join(ROOT, 'dist');
+const VERCEL_CONFIG = path.join(ROOT, 'vercel.json');
 
 /**
- * Adresse du backend, lue dans la meme source que la configuration Vercel.
+ * Adresse du backend, lue dans la même source que la configuration Vercel.
  *
  * SOURCE UNIQUE
  * -------------
- * L'URL du backend apparait deux fois dans `vercel.json` : le relais `/api`
- * et la directive `connect-src` de la CSP (le WebSocket ne peut pas etre
- * relaye par Vercel, il doit donc etre autorisé explicitement). Deux
+ * L'URL du backend apparaît deux fois dans `vercel.json` : le relais `/api`
+ * et la directive `connect-src` de la CSP (le WebSocket ne peut pas être
+ * relayé par Vercel, il doit donc être autorisé explicitement). Deux
  * occurrences à renseigner à la main, c'est deux occasions d'en oublier une —
- * et l'oubli est silencieux : la page s'affiche, puis le chronometre ne
+ * et l'oubli est silencieux : la page s'affiche, puis le chronomètre ne
  * descend plus.
  *
- * Ce script lit donc le fichier, verifie que le marqueur a bien ete remplace,
- * et echoue le build sinon. Le deploiement echoue donc tot, et bruyamment,
- * plutot qu'etre livre avec un canal temps reel casse.
+ * La logique de lecture et de cohérence vit dans `vercel-backend.mjs`, parce
+ * qu'un troisième emplacement la consomme : `scripts/build.mjs` en déduit
+ * `VITE_WS_URL`. Deux implémentations de la même lecture divergeraient, et la
+ * divergence se manifesterait comme un chrono figé — pas comme une erreur.
  */
-const VERCEL_CONFIG = path.join(ROOT, 'vercel.json');
-const MARQUEUR = 'REMPLACER_PAR_TON_API';
+function verifierBackendConfigure(override) {
+  const brut = readFileSync(VERCEL_CONFIG, 'utf8');
+  const { origin, wsUrl, originOverride } = resolveBackendOrigin(brut, { override });
 
-async function verifierBackendConfigure() {
-  const brut = await readFile(VERCEL_CONFIG, 'utf8');
-  if (brut.includes(MARQUEUR)) {
-    const occurrences = (brut.match(new RegExp(MARQUEUR, 'g')) ?? []).length;
-    throw new Error(
-      `vercel.json contient encore le marqueur « ${MARQUEUR} » (${occurrences} occurrence(s)).\n` +
-        `  Remplace-le par l'URL de ton backend, dans les DEUX endroits :\n` +
-        `    - la destination du relais /api\n` +
-        `    - la directive connect-src de la CSP (WebSocket)\n` +
-        `  Exemple : https://api.aeerks.sn`
+  if (originOverride) {
+    console.log(
+      `[vercel] VALIDATION ONLY — origine de test : ${origin}\n` +
+        `         Le déploiement réel exige vercel.json configuré.`
     );
+  } else {
+    console.log(`[vercel] Backend configuré : ${origin}`);
   }
-  // Cohérence entre les deux emplacements : ils doivent nommer le même hôte.
-  //
-  // On ne compare que les deux endroits qui comptent, pas toutes les URL du
-  // fichier : `$schema` pointe vers `openapi.vercel.sh`, qui n'est pas un
-  // backend. Comparer « toutes les URL » à `> 1` aurait signalé cette URL de
-  // schéma à chaque déploiement.
-  const relais = brut.match(/"destination":\s*"(https?:\/\/[^/"]+)/i)?.[1]?.toLowerCase();
-  const csp = brut.match(/connect-src[^"]*?(https?:\/\/[a-z0-9.:-]+)/i)?.[1]?.toLowerCase();
-
-  if (!relais) {
-    throw new Error(
-      `vercel.json : aucune destination https pour le relais /api. ` +
-        `Sans elle, l'interface appelle /api sur le CDN, qui ne repond pas.`
-    );
-  }
-  if (csp && csp !== relais) {
-    throw new Error(
-      `vercel.json : le relais /api vise ${relais} mais connect-src vise ${csp}.\n` +
-        `  Les deux doivent etre identiques : sinon le jeton de session est emis ` +
-        `pour un hote et refuse par l'autre, et l'utilisateur se voit deconnecte ` +
-        `sans explication.`
-    );
-  }
-  console.log(`[vercel] Backend configuré : ${relais}`);
+  console.log(`[vercel] Canal temps réel attendu : ${wsUrl}`);
+  return { origin, wsUrl, originOverride };
 }
 
 /**
@@ -175,7 +154,11 @@ async function copyApp({ app, prefix }) {
 }
 
 console.log('[vercel] Assemblage de dist/ ...');
-await verifierBackendConfigure();
+// `--backend <origine>` : mode VALIDATION, réservé à la CI, qui doit pouvoir
+// éprouver la mécanique d'assemblage alors que `vercel.json` contient encore le
+// marqueur. Il ne doit jamais être défini sur un déploiement réel : c'est
+// précisément le cas que le garde-fou doit laisser passer.
+verifierBackendConfigure(readBackendOverride(process.argv));
 await rm(OUT, { recursive: true, force: true });
 await mkdir(OUT, { recursive: true });
 

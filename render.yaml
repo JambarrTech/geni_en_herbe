@@ -3,44 +3,49 @@
 # UN SEUL SERVICE, ET C'EST DÉLIBÉRÉ
 # ===================================
 # Render accorde 750 heures gratuites PAR WORKSPACE ET PAR MOIS, partagées entre
-# tous les services. Quatre services — un par processus, comme dans
-# `docker-compose.yml` — demanderaient 3000 heures : quatre fois le plafond.
-# Un service unique consomme exactement 750 heures.
+# tous les services. Quatre services — un par processus — demanderaient
+# 3000 heures, soit quatre fois le plafond. Un service unique consomme
+# exactement 750 heures.
 #
-# Les quatre processus (`api`, `ws`, `worker`, `static`) sont donc lancés par
-# `backend/src/supervisor.ts`, qui les supervise comme quatre processus de
-# l'OS distincts. L'ISOLATION EST PRÉSERVÉE : un traitement long côté API ne
-# peut pas figer la boucle de chrono. Seul `static` ouvre le port public ; il
-# relaie déjà `/api` et `/ws` (cf. `backend/src/server/static.ts`), donc aucun
-# second service n'est nécessaire.
+# Les quatre processus (`api`, `ws`, `worker`, `static`) sont lancés par
+# `backend/src/supervisor.ts`, qui les supervise comme quatre processus de l'OS
+# distincts. L'ISOLATION EST PRÉSERVÉE : un traitement long côté API ne peut pas
+# figer la boucle de chrono. Seul `static` ouvre le port public ; il relaie déjà
+# `/api` et `/ws` (cf. `backend/src/server/static.ts`), donc aucun second service
+# n'est nécessaire.
+#
+# RUNTIME NATIF, PAS D'IMAGE
+# ==========================
+# Ce service tourne sur le runtime Node de Render : le dépôt ne contient plus de
+# Dockerfile. Deux conséquences :
+#   - c'est `buildCommand` qui produit TOUT ce que `startCommand` sert — les
+#     trois applications Vite comme les dépendances du backend ;
+#   - `tsx` est une dépendance de PRODUCTION du backend (cf.
+#     `backend/package.json`), puisqu'il est le chargeur qui exécute le
+#     superviseur. Une installation `--omit=dev` ne le retire donc pas.
 #
 # Le pas-à-pas est dans `docs/DEPLOIEMENT-RENDER.md`.
 
 services:
   - type: web
     name: aeerks
-    runtime: docker
+    runtime: node
     plan: free
 
-    # Le Dockerfile construit déjà les trois applications Vite et installe les
-    # dépendances de production du backend : il n'y a rien à faire avant.
-    dockerfilePath: ./Dockerfile
-    dockerContext: .
-    # AUCUNE surcharge de `buildCommand` NI de `dockerCommand`.
+    # Deux arbres de dépendances : les workspaces (`apps/*`, à la racine) et le
+    # backend, qui possède son propre `package.json` et son propre verrou.
     #
-    # `buildCommand` est réservé par Render aux runtimes natifs (node, python…) :
-    # sur un service `runtime: docker`, c'est le Dockerfile qui construit. Un
-    # `buildCommand` ici serait purement ignoré — et laisserait croire qu'une
-    # étape de construction existe, alors que c'est le Dockerfile qui s'en charge.
-    #
-    # `dockerCommand` reste volontairement ABSENT. Le Dockerfile déclare déjà
-    # `ENTRYPOINT ["/sbin/tini", "--", "npm", "run"]` et `CMD ["start:all"]`,
-    # soit exactement le processus voulu. Une surcharge Render ajoutait une
-    # seconde source de vérité pour le même résultat, et surtout une
-    # réinterprétation : ce champ est une LIGNE DE COMMANDE que Render applique
-    # au conteneur, pas forcément un simple argument d'ENTRYPOINT. Le `CMD` du
-    # Dockerfile est le comportement Docker standard, documenté et vérifiable ;
-    # on s'y tient, d'autant que le redémarrage du conteneur en dépendait.
+    # `--include=dev` n'est pas une coquetterie : Render définit
+    # `NODE_ENV=production`, ce qui ferait omettre les dépendances de
+    # développement — dont `vite`, sans lequel les trois interfaces ne se
+    # compilent pas. Le backend n'a pas besoin de l'option : son unique outil de
+    # production, `tsx`, est déclaré dans `dependencies`.
+    buildCommand: npm ci --include=dev && npm run build && npm ci --prefix backend
+
+    # Le superviseur DOIT partir de `backend/` : il résout `tsx` à partir du
+    # dossier courant (`process.cwd()`) pour ses processus enfants. Lancé depuis
+    # la racine, le chargement de `tsx` échouerait.
+    startCommand: cd backend && npm run start:all
 
     # Sonde de Render. `/__static_health` est exposée par le processus `static`
     # et répond avant toute politique de sécurité : une sonde qui dépend de la
@@ -56,37 +61,14 @@ services:
     # `PORT` est injecté par Render et vaut généralement 10000. Le superviseur
     # le transmet à `static` comme `STATIC_PORT`, et le SUPPRIME pour `api`,
     # `ws` et `worker` — sans quoi l'API tenterait d'écouter sur le port public,
-    # déjà pris, et le conteneur mourrait sur EADDRINUSE.
+    # déjà pris, et le service mourrait sur EADDRINUSE.
     #
     # Les trois processus privés restent sur 4000/4001/4002 : injoignables de
-    # l'extérieur, ce qui est la disposition de `docker-compose.yml`.
+    # l'extérieur.
 
-    # Migrations AVANT le démarrage du service.
-    #
-    # Fourni mais DÉSACTIVÉ : les migrations s'appliquent à la main, une fois,
-    # depuis votre machine (`npm run db:migrate`). Voir docs/DEPLOIEMENT-RENDER.md.
-    #
-    # Pour l'automatiser, deux options : Render n'a pas de type `job`.
-    # Une migration est une TÂCHE PONCTUELLE qui se termine — donc `type: cron`
-    # avec un planning, pas `type: worker` (qui reste résident). Le blueprint ci-dessous
-    # est laissé commenté parce que `drizzle-kit` est une devDependency absente de
-    # l'image de production : il viserait la cible `migrate` du Dockerfile, qui
-    # installe les dépendances de développement.
-    #
-    # Si vous le décommentez, déclarez-le AVANT `aeerks` : Render traite les
-    # services dans l'ordre, donc le schéma sera prêt quand l'API recevra sa
-    # première requête.
-    #
-    #   - type: cron
-    #     name: aeerks-migrations
-    #     runtime: docker
-    #     schedule: "0 3 1 * *"     # le 1er de chaque mois à 03:00 UTC
-    #     dockerfilePath: ./Dockerfile.migrate
-    #     dockerContext: .
-    #     dockerCommand: db:migrate
-    #     envVars:
-    #       - key: DATABASE_URL
-    #         sync: false
+    # Migrations : à la main, une fois, depuis votre machine (`npm run
+    # db:migrate`). Rien à automatiser ici : `drizzle-kit` est une devDependency
+    # et ne fait pas partie du service. Voir docs/DEPLOIEMENT-RENDER.md.
 
     envVars:
       - key: DATABASE_URL
@@ -101,12 +83,27 @@ services:
       # dès le premier bot.
       - key: TRUST_PROXY
         value: "true"
-      # VIDE, et c'est volontaire. Tout est sur une seule origine, donc le
-      # contrôle d'origine des WebSocket laisse passer l'interface. Le
-      # renseigner ici restreindrait l'accès au LAN sans nécessité — voir
-      # `backend/.env.example`.
+      # À DÉFINIR DANS LE DASHBOARD RENDER. C'est la seule variable que ce
+      # blueprint ne peut pas préremplir, parce qu'elle dépend du domaine choisi
+      # pour l'interface.
+      #
+      # Le serveur de diffusion REFUSE toute connexion dont l'origine n'est pas
+      # dans la liste. Vide = même origine uniquement, ce qui suffit quand
+      # l'interface est servie par ce service lui-même.
+      #
+      # Si l'interface est sur Vercel (docs/DEPLOIEMENT-VERCEL.md), le navigateur
+      # annonce l'origine Vercel, pas celle de Render : la valeur doit donc être
+      # l'origine Vercel, sans barre oblique finale.
+      #
+      #     WS_ALLOWED_ORIGINS=https://aeerks.vercel.app
+      #
+      # Symptôme d'une valeur absente ou incorrecte : la connexion est refusée en
+      # code 1008, le jury se connecte mais le chrono ne descend pas. Aucune erreur
+      # visible ailleurs — d'où l'importance de cette variable. `sync: false` est
+      # donc volontaire : elle rend le setting explicite plutôt que silencieusement
+      # vide.
       - key: WS_ALLOWED_ORIGINS
-        value: ""
+        sync: false
 
       # AUCUNE variable NODE_OPTIONS, volontairement.
       #
@@ -114,11 +111,10 @@ services:
       # moins une marge ». C'est faux dès que le superviseur tourne : la
       # variable est héritée par les QUATRE processus enfants, donc 4 × 480 Mo
       # potentiels pour 512 Mo réels. Le plafond devient une promesse que le
-      # conteneur ne peut pas tenir, et Node raisonne alors en OOM imminent
-      # bien avant qu'il n'arrive — GC agressif, puis mort.
+      # service ne peut pas tenir, et Node raisonne alors en OOM imminent bien
+      # avant qu'il n'arrive — GC agressif, puis mort.
       #
-      # Le plafond du V8 par défaut s'ajuste déjà à la mémoire du conteneur, et
-      # il le fait en tenant compte de ce qui est réellement disponible. Une
+      # Le plafond du V8 par défaut s'ajuste déjà à la mémoire disponible. Une
       # valeur écrite à la main ne peut que mentir sur ce point.
       #
       # Si la mémoire devient un problème, le bon levier est `plan:

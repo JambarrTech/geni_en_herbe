@@ -24,7 +24,26 @@ const LiveContext = createContext<LiveContextType | undefined>(undefined);
  */
 const STALE_AFTER_MS = APP_CONFIG.WS_STALE_AFTER_MS;
 
-export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+interface LiveProviderProps {
+  children: React.ReactNode;
+  /**
+   * Joindre le jeton de session à l'URL du WebSocket ?
+   *
+   * Par défaut `true` (jury, admin). L'écran public passe `false` : il diffuse
+   * exactement le même contenu qu'un client authentifié — le serveur se sert du
+   * jeton uniquement pour répondre `authenticated: true/false` dans son message
+   * `connected`, que ce module ignore — et n'a donc rien à y gagner.
+   *
+   * Ce n'est pas qu'une économie : `/` et `/jury` partagent la même origine,
+   * donc le même `localStorage`. Un poste qui a arbitré conserve son jeton, et
+   * l'écran projeté le renvoyait ensuite dans la chaîne de requête du socket —
+   * où il atterrit dans les journaux d'accès, les historiques et les outils de
+   * diagnostic, pour rien.
+   */
+  sendToken?: boolean;
+}
+
+export const LiveProvider: React.FC<LiveProviderProps> = ({ children, sendToken = true }) => {
   const [liveState, setLiveState] = useState<LiveStatePayload | null>(null);
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [timerLeft, setTimerLeft] = useState<number>(APP_CONFIG.DEFAULT_TIMER_SECONDS);
@@ -68,7 +87,9 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (disposed) return;
       // Jeton transmis : le serveur peut alors distinguer un client staff
       // authentifié du flux public. (Absent => flux public, inchangé.)
-      const token = getStoredToken();
+      // L'écran public demande explicitement l'absence de jeton — cf. le
+      // commentaire sur `sendToken`.
+      const token = sendToken ? getStoredToken() : null;
       // Par défaut le socket suit l'origine de la page (auto-hébergement, le
       // processus `static` relaie `/ws`). `VITE_WS_URL` ne sert que lorsque
       // l'interface est déployée ailleurs que l'API — le CDN ne relaie pas de
@@ -224,7 +245,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       window.removeEventListener('online', onOnline);
       if (ws) ws.close();
     };
-  }, [refreshLiveState]);
+  }, [refreshLiveState, sendToken]);
 
   return (
     <LiveContext.Provider

@@ -59,9 +59,9 @@ administrateur ne doit pouvoir être créé par défaut.
 ## Pourquoi un seul service
 
 L'offre gratuite de Render accorde **750 heures par workspace et par mois**,
-partagées entre tous les services. Quatre services — un par processus, comme
-dans `docker-compose.yml` — demanderaient 3000 heures, soit quatre fois le
-plafond. Un service unique consomme exactement 750 heures.
+partagées entre tous les services. Quatre services — un par processus —
+demanderaient 3000 heures, soit quatre fois le plafond. Un service unique
+consomme exactement 750 heures.
 
 Les quatre processus restent des **processus de l'OS distincts**, lancés et
 surveillés par `backend/src/supervisor.ts`. L'isolation est donc préservée : un
@@ -69,14 +69,50 @@ traitement de requête long côté API ne peut pas figer la boucle de chrono.
 
 ## Création du service
 
-1. *New* → *Blueprint* → sélectionnez le dépôt. Render lit `render.yaml`.
-2. Renseignez `DATABASE_URL` (la nouvelle). Les autres variables sont déjà
-   définies dans le blueprint.
-3. *Apply*. Le premier déploiement prend quelques minutes (image Docker complète).
+Le service tourne sur le **runtime Node natif** de Render : le dépôt ne
+contient plus de Dockerfile, tout est produit par le `buildCommand` du
+blueprint.
 
-Aucun *Build Command* supplémentaire n'est nécessaire : le `Dockerfile` compile
-les trois applications Vite et installe les dépendances de production du
-backend. `start:all` est la seule commande nécessaire.
+1. *New* → *Blueprint* → sélectionnez le dépôt. Render lit `render.yaml`.
+2. Renseignez les deux variables à `sync: false` :
+   - `DATABASE_URL` — l'URL Neon complète, avec `?sslmode=require` ;
+   - `WS_ALLOWED_ORIGINS` — l'origine de l'interface, voir ci-dessous.
+3. *Apply*. Le premier déploiement compile les trois applications Vite, ce qui
+   prend quelques minutes.
+
+### `WS_ALLOWED_ORIGINS` : la variable qui décide du chrono
+
+Le serveur de diffusion refuse toute connexion dont l'origine n'est pas
+autorisée. La valeur par défaut (`""`) n'autorise **que la même origine** — ce
+qui suffit quand l'interface est servie par Render lui-même.
+
+Si l'interface est déployée sur **Vercel** (voir
+[DEPLOIEMENT-VERCEL.md](DEPLOIEMENT-VERCEL.md)), le navigateur annonce
+l'origine Vercel et non celle de Render. La liste doit donc contenir cette
+origine, sans barre oblique finale :
+
+```
+WS_ALLOWED_ORIGINS=https://aeerks.vercel.app
+```
+
+Deux origines si l_screen public et le jury sont sur des domaines différents —
+la liste est séparée par des virgules :
+
+```
+WS_ALLOWED_ORIGINS=https://aeerks.vercel.app,https://jury.aeerks.sn
+```
+
+> **Symptôme d'une valeur absente ou incorrecte :** le jury se connecte, le
+> chrono ne descend pas, et l'écran public affiche « Direct » puis se fige.
+> La connexion est refusée en code **1008**. Ce n'est ni un bug de build ni un
+> problème de base : vérifiez cette variable en premier.
+> `node scripts/check-render-blueprint.mjs` affiche sa valeur attendue.
+
+Pour vérifier que le canal fonctionne réellement :
+
+```bash
+npx tsx backend/scripts/ws-smoke.mjs wss://aeerks.onrender.com/ws
+```
 
 ## La disposition des ports : un seul point d'entrée
 

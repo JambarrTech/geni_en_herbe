@@ -5,7 +5,7 @@
   "buildCommand": "npm run build && node scripts/assemble-vercel-dist.mjs",
   "outputDirectory": "dist",
   "rewrites": [
-    { "source": "/api/:path*", "destination": "https://REMPLACER_PAR_TON_API/api/:path*" },
+    { "source": "/api/:path*", "destination": "https://aeerks.onrender.com/api/:path*" },
     { "source": "/jury/:path*", "destination": "/jury/index.html" },
     { "source": "/admin/:path*", "destination": "/admin/index.html" },
     { "source": "/:path*", "destination": "/index.html" }
@@ -30,7 +30,7 @@
         { "key": "Strict-Transport-Security", "value": "max-age=31536000; includeSubDomains" },
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' wss://REMPLACER_PAR_TON_API; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; frame-src 'none'; upgrade-insecure-requests"
+          "value": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' wss://aeerks.onrender.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; frame-src 'none'; upgrade-insecure-requests"
         }
       ]
     },

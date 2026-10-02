@@ -90,6 +90,48 @@ jobs:
           retention-days: 7
 
   # ---------------------------------------------------------------------------
+  # Preparation du deploiement Vercel
+  # ---------------------------------------------------------------------------
+  vercel:
+    name: Assemblage du dist/ Vercel
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: verify
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Installer les dépendances
+        run: npm ci
+
+      # Cet assemblage n'était vérifié par AUCUNE porte : un `VITE_BASE_PATH`
+      # faux ne fait pas échouer Vite, il produit trois pages blanches que seul
+      # un navigateur peut révéler. Le script échoue donc sur une référence
+      # d'asset absente de `dist/`, et cette étape le fait tourner.
+      #
+      # `--backend` fournit une origine de validation : `vercel.json` livré
+      # contient le marqueur `REMPLACER_PAR_TON_API` tant que le domaine n'est
+      # pas choisi, et le garde-fou doit alors refuser le déploiement — pas la
+      # vérification. On valide donc la mécanique (préfixes, assets, chemin de
+      # sortie) avec une origine synthétique.
+      - name: Assembler dist/ et vérifier les références d'assets
+        run: |
+          npm run build
+          node scripts/assemble-vercel-dist.mjs --backend https://validation.invalid
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vercel-dist
+          path: dist
+          retention-days: 3
+
+  # ---------------------------------------------------------------------------
   # Sonde de concurrence : la preuve, pas l'intention
   # ---------------------------------------------------------------------------
   # Le verrou de ligne sur le score est la correction la plus grave du projet.
@@ -132,49 +174,3 @@ jobs:
         run: |
           cd backend
           node --import tsx test/probe-lost-update-fixed.mjs
-
-  # ---------------------------------------------------------------------------
-  # Image de production
-  # ---------------------------------------------------------------------------
-  docker:
-    name: Construction de l'image
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    needs: verify
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: docker/setup-buildx-action@v3
-
-      - name: Construire l'image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile
-          target: runtime
-          push: false
-          load: true
-          tags: aeerks/backend:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      # Une image qui se construit mais ne démarre pas ne sert à rien. On
-      # vérifie que le point d'entrée par défaut répond.
-      - name: Vérifier que l'image démarre et répond
-        run: |
-          docker run -d --name aeerks-ci -p 4000:4000 aeerks/backend:ci
-          # On attend la sonde de santé du conteneur plutôt qu'un sleep fixe.
-          for i in $(seq 1 30); do
-            if docker exec aeerks-ci wget -qO- http://127.0.0.1:4000/api/health; then
-              echo ""
-              echo "L'image repond sur /api/health."
-              docker rm -f aeerks-ci
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "L'image ne repond pas."
-          docker logs aeerks-ci || true
-          docker rm -f aeerks-ci
-          exit 1

@@ -53,10 +53,11 @@ notification n'est délivrée qu'au commit de la transaction émettrice, donc un
 score n'est jamais diffusé avant d'être validé. Si `ws` tombe, l'API continue
 de fonctionner et les clients se resynchronisent à la reconnexion.
 
-> **Attention au déploiement horizontal.** Un seul worker doit tourner à la
-> fois : deux boucles de chrono se disputeraient la même ligne. Les sessions
-> sont aussi en mémoire et ne sont pas partagées entre instances. Ces deux
-> points doivent être réglés avant de passer à plusieurs instances.
+> **Attention au déploiement horizontal.** Un seul `worker` doit tenir le
+> verrou de leader à la fois : deux boucles de chrono se disputeraient la même
+> ligne (`pg_try_advisory_lock`, voir `backend/src/server/leaderLock.ts`). Le
+> bus `LISTEN/NOTIFY` et les sessions étant en base, le reste de la plateforme
+> passe à l'échelle ; seul le nombre d'instances `worker` reste à disciplined.
 
 ### Démarrage
 
@@ -73,7 +74,7 @@ npm run dev                 # API + les trois apps Vite (proxy Vite vers l'API)
 cd backend && npm run dev:worker   # boucle de chrono, terminal séparé
 ```
 
-## Démarrage
+## Installation et premier lancement
 
 1. Installation des dépendances :
 
@@ -129,6 +130,47 @@ node --import tsx test/static-traversal.mjs    # traversée de répertoire (HTTP
 `noUnusedLocals` / `noUnusedParameters` sont activés dans les quatre `tsconfig.json` :
 le code mort échoue à la compilation plutôt que de s'accumuler.
 
+## Déploiement
+
+La disposition retenue : **les trois interfaces sur Vercel, le backend sur Render**.
+
+```
+aeerks.onrender.com/          → écran public, /jury, /admin, /api/* et /ws  (Render)
+*.vercel.app/                 → les trois interfaces (CDN)
+             /api/*           → relayé par Vercel vers le backend
+```
+
+Ce découpage n'est pas un arbitraire : **le canal temps réel et la boucle de
+chrono ne peuvent pas tourner sur une fonction serverless**. Vercel n'accepte
+ni connexion WebSocket entrante, ni processus de longue durée — les processus
+`ws` et `worker` sont donc sur l'hôte de processus permanents, tandis que les
+52 endpoints REST et les sessions étant déjà sans état, l'API suit n'importe où.
+
+Guide pas-à-pas : [docs/DEPLOIEMENT-VERCEL.md](docs/DEPLOIEMENT-VERCEL.md) et
+[docs/DEPLOIEMENT-RENDER.md](docs/DEPLOIEMENT-RENDER.md).
+
+### La variable qui casse le chrono en silence
+
+Si l'interface est sur Vercel, `WS_ALLOWED_ORIGINS` **doit** contenir l'origine
+Vercel côté Render. Sinon le navigateur annonce une origine non autorisée, la
+connexion est refusée en code 1008, et le jury voit un chrono qui ne descend pas
+sans le moindre message d'erreur.
+
+```bash
+npm run render:check    # affiche la valeur attendue et l'état du blueprint
+```
+
+### Le backend, en une commande
+
+```bash
+npm run vercel:backend -- https://aeerks.onrender.com   # remplit vercel.json
+npm run vercel:assemble                                 # vérifie dist/ avant déploiement
+```
+
+`vercel.json` est la **source unique** : le relais `/api`, la directive
+`connect-src` de la CSP et le `VITE_WS_URL` injecté au build en découlent. Une
+saisie, et le build échoue bruyamment si elle est absente ou incohérente.
+
 ## Base de données
 
 ```bash
@@ -153,8 +195,9 @@ le code mort échoue à la compilation plutôt que de s'accumuler.
   (l'écran public en dépend).
 - **Sessions** : la `active` et le rôle sont revalidés en base à **chaque** requête.
   Désactiver ou rétrograder un compte révoque immédiatement ses sessions ouvertes.
-  Les sessions vivent en mémoire : un redémarrage du backend les invalide, et le
-  déploiement ne doit pas être horizontal sans store partagé.
+  Elles sont stockées en table `sessions` et non en mémoire (voir ADR-0001) :
+  un redémarrage ou un redéploiement ne déconnecte plus le jury, et l'API se
+  déploie à l'échelle sans session collante.
 - **Réponse officielle** : `backend/src/lib/sanitize.ts` (`publicQuestion`) retire
   `answer` et `explanation` de tout payload public. Toute nouvelle diffusion doit
   passer par cette fonction.

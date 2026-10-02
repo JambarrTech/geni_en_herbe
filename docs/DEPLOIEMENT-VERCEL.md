@@ -70,27 +70,36 @@ seule origine, donc le backend n'a besoin d'aucune configuration CORS.
 
 ## Étape 1 — Renseigner l'adresse du backend
 
-Deux emplacements dans `vercel.json`, tous deux marqués
-`REMPLACER_PAR_TON_API` :
+Une commande, deux emplacements :
 
-1. la destination du relais `/api` ;
-2. la directive `connect-src` de la CSP (le WebSocket).
+```bash
+npm run vercel:backend -- https://aeerks.onrender.com
+```
+
+Elle remplace les deux `REMPLACER_PAR_TON_API` de `vercel.json` — la destination
+du relais `/api` et la directive `connect-src` de la CSP — en préservant le
+schéma propre à chacun (`https:` pour le relais, `wss:` pour le canal), puis
+affiche les étapes qui restent sur les autres plateformes.
 
 ```diff
 - { "source": "/api/:path*", "destination": "https://REMPLACER_PAR_TON_API/api/:path*" },
-+ { "source": "/api/:path*", "destination": "https://api.exemple.sn/api/:path*" },
-```
++ { "source": "/api/:path*", "destination": "https://aeerks.onrender.com/api/:path*" },
 
-```diff
 - connect-src 'self' wss://REMPLACER_PAR_TON_API;
-+ connect-src 'self' wss://api.exemple.sn;
++ connect-src 'self' wss://aeerks.onrender.com;
 ```
 
-Le build **échoue** tant que le marqueur est présent, et vérifie en plus que
-les deux emplacements nomment le même hôte. C'est volontaire : si le relais et
-le socket visent des hôtes différents, le jeton de session est émis pour l'un et
-refusé par l'autre, et l'utilisateur voit une déconnexion inexplicable — sans
-le moindre message d'erreur.
+**Il n'y a rien d'autre à saisir.** `VITE_WS_URL` est déduit de `vercel.json`
+par `scripts/build.mjs` : la valeur vivait auparavant dans le tableau de bord
+Vercel, où ni le build ni le garde-fou de cohérence ne pouvaient la voir, et
+dont l'oubli ne se manifeste qu'en plein match — chronomètre figé. Une seule
+saisie, et le contrôle porte désormais sur l'ensemble.
+
+Le build **échoue** tant que le marqueur est présent, et vérifie que les deux
+emplacements nomment le même **hôte**. C'est volontaire : si le relais et le
+socket visent des hôtes différents, le jeton de session est émis pour l'un et
+refusé par l'autre, et l'utilisateur voit une déconnexion inexplicable — sans le
+moindre message d'erreur.
 
 ## Étape 2 — Déployer le backend
 
@@ -124,21 +133,29 @@ base — c'est le comportement par défaut, inchangé.
    racine d'un projet ici).
 2. Vercel détecte `vercel.json` : commande de build, répertoire de sortie et
    réécritures en sont déjà définis. Framework : laisser vide (`framework: null`).
-3. Définir `VITE_WS_URL` :
-   - **Production** : `wss://api.exemple.sn`
-   - **Prévisualisation** : l'URL de la prévisualisation est un sous-domaine
-     variable. Ajoutez-la à `WS_ALLOWED_ORIGINS` côté backend, ou laissez
-     `VITE_WS_URL` vide en prévisualisation (le socket suit alors le CDN, qui
-     ne le relaie pas : le temps réel ne fonctionnera pas — c'est le prix d'une
-     prévisualisation sur un CDN).
+3. **Aucune variable d'environnement n'est nécessaire.** `VITE_WS_URL` est
+   calculé depuis `vercel.json` pendant le build.
+
+### Prévisualisations
+
+Chaque prévisualisation Vercel est servie sur un sous-domaine **variable**
+(`aeerks-<hash>.vercel.app`). Le socket, lui, vise toujours le backend, qui n'accepte
+que les origines listées dans `WS_ALLOWED_ORIGINS` : une prévisualisation sera
+donc **affichée mais sans temps réel** (la CSP `connect-src` la laisse passer,
+la liste d'origines côté backend non).
+
+C'est le prix d'un CDN devant un canal WebSocket, et cela ne concerne pas la
+production. Si vous voulez une prévisualisation fonctionnelle, ajoutez
+`WS_ALLOWED_ORIGINS_VERCEL_PREVIEW` côté backend en acceptant le motif
+`*.vercel.app`, ou testez le backend directement (voir l'annexe).
 
 ### À propos de `outputDirectory`
 
-Vercel n'exécute pas le build en local : le répertoire de sortie doit donc
-exister dans le dépôt au moment de la construction. La commande de build est
-`npm run build && node scripts/assemble-vercel-dist.mjs`, qui produit `dist/`
-à la racine. `dist/` est ignoré par git, ce qui est correct : c'est un artefact
-de construction, pas une source.
+Vercel **exécute** `buildCommand` dans son propre environnement de construction :
+`npm run build && node scripts/assemble-vercel-dist.mjs`, qui produit `dist/` à
+la racine. `dist/` n'a donc pas besoin d'exister dans le dépôt au moment de la
+construction, et son exclusion de git est correcte — c'est un artefact, pas une
+source.
 
 ## Étape 4 — Vérifier
 
