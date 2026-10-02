@@ -3,6 +3,7 @@ import type { LiveStatePayload } from '../types.ts';
 import { APP_CONFIG } from '../lib/config.ts';
 import { api, getStoredToken, isAbort } from '../lib/api.ts';
 import { resolveWsUrl } from '../lib/wsUrl.ts';
+import { delaiDeReconnexion, estFermetureDefinitive } from '../lib/wsLifecycle.ts';
 
 interface LiveContextType {
   liveState: LiveStatePayload | null;
@@ -104,7 +105,11 @@ export const LiveProvider: React.FC<LiveProviderProps> = ({ children, sendToken 
       ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
-        reconnectDelay = APP_CONFIG.WS_RECONNECT_DELAY_MS;
+        // Le backoff n'est PAS remis à zéro ici : une socket ouverte puis
+        // refermée aussitôt par le serveur n'a rien prouvé de sain, et
+        // réinitialiser ici donnerait un essai toutes les 2 s, sans ralentir.
+        // La remise à zéro se fait sur le premier message (cf. `onmessage`),
+        // qui est la preuve que la connexion fonctionne réellement.
         setIsConnected(true);
         // Re-synchronisation : sans elle, un coupure réseau laisse l'écran
         // public reconnecté sur un chrono figé et des scores périmés, avec la
@@ -116,22 +121,17 @@ export const LiveProvider: React.FC<LiveProviderProps> = ({ children, sendToken 
       ws.onclose = (event) => {
         setIsConnected(false);
         if (disposed) return;
-        // Une fermeture volontaire du serveur (1000) ou un refus d'authentification
-        // (1008/1011) ne se répare pas en reconnectant : on arrête la boucle
-        // plutôt que de marteler le serveur toutes les 2 s pendant 12 heures.
-        const terminal =
-          event.code === 1000 ||
-          event.code === APP_CONFIG.WS_CLOSE_INVALID_AUTH ||
-          event.code === APP_CONFIG.WS_CLOSE_VERIFY_ERROR;
-        if (terminal) {
+        // Une fermeture définitive ne se répare pas en reconnectant : on arrête
+        // la boucle plutôt que de marteler le serveur toutes les 2 s pendant
+        // 12 heures. La liste est dans `wsLifecycle.ts`, qui la documente —
+        // et 1011 (erreur de vérification, donc base injoignable) n'y est pas :
+        // cette panne-là se répare en réessayant.
+        if (estFermetureDefinitive(event.code)) {
           console.warn(`WebSocket fermé définitivement (code ${event.code}) : pas de reconnexion.`);
           return;
         }
         reconnectTimeout = setTimeout(connect, reconnectDelay);
-        reconnectDelay = Math.min(
-          reconnectDelay * 2,
-          APP_CONFIG.WS_RECONNECT_MAX_DELAY_MS
-        );
+        reconnectDelay = delaiDeReconnexion(reconnectDelay);
       };
 
       ws.onerror = () => {
@@ -140,6 +140,11 @@ export const LiveProvider: React.FC<LiveProviderProps> = ({ children, sendToken 
       };
 
       ws.onmessage = (event) => {
+        // Premier message reçu = connexion réellement fonctionnelle : c'est
+        // ici, et seulement ici, que le backoff repart de sa valeur de départ.
+        // Une reconnexion réussie doit rester rapide ; une connexion que le
+        // serveur referme sans rien envoyer, elle, doit continuer de ralentir.
+        reconnectDelay = APP_CONFIG.WS_RECONNECT_DELAY_MS;
         lastMessageAt.current = Date.now();
         setLastUpdateAt(Date.now());
         try {

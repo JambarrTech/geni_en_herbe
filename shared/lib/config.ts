@@ -21,7 +21,14 @@ export const APP_CONFIG = {
   // Au-delà de ce silence, la connexion est présumée morte (portable en veille,
   // routeur qui coupe) : resynchronisation forcée + reconnexion.
   WS_STALE_AFTER_MS: 8000,
-  // Codes de fermeture « définitifs » : on ne reconnecte pas.
+  // Codes de fermeture émis par le serveur (cf. `lib/wsLifecycle.ts`, qui
+  // décide lequel est définitif).
+  //
+  // 1011 n'est PAS définitif malgré son numéro d'erreur interne : le serveur
+  // l'emploie quand la vérification du jeton a échoué, donc quand la base n'a
+  // pas répondu. Cette panne se répare en réessayant. C'est précisément pour
+  // cette raison que la liste des codes à ne pas réessayer vit dans
+  // `wsLifecycle.ts` et non dans cette constante.
   WS_CLOSE_INVALID_AUTH: 1008,
   WS_CLOSE_VERIFY_ERROR: 1011,
 
