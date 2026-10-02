@@ -179,9 +179,33 @@ jobs:
       - name: Installer les dépendances du backend
         run: npm ci --prefix backend
 
+      # On passe par SQL_HOST/SQL_USER/... et NON par DATABASE_URL.
+      #
+      # `backend/src/db/index.ts` impose `ssl: { rejectUnauthorized: true }`
+      # des que DATABASE_URL est defini : c'est le bon reglage pour Neon, dont le
+      # TLS est obligatoire, mais le conteneur `postgres:17-alpine` de ce job ne
+      # parle PAS en TLS. Le client echange alors un SSLRequest, recoit « N », et
+      # refuse la connexion : « The server does not support SSL connections ».
+      #
+      # La sonde echouait donc sur TOUS les runs, depuis l'introduction de la
+      # validation stricte du certificat, sans jamais avoir rien prouve sur le
+      # verrou de ligne. La branche SQL_* de la meme fonction ne pose aucune
+      # option ssl : c'est le chemin prevu pour une base locale, et il convient
+      # exactement, puisque la sonde verifie un comportement SQL et non le TLS.
+      #
+      # `DB_SSL_REJECT_UNAUTHORIZED=0` n'aurait PAS regle le probleme : il ne
+      # desactiv que la VALIDATION du certificat. Un serveur qui ne parle pas
+      # TLS du tout reste refuse.
+      #
+      # Le code de sortie distingue les deux echecs (voir la sonde) :
+      #   1 = le verrou de ligne ne tient pas  -> vrai defaut de code ;
+      #   2 = la sonde n'a pas demarre           -> defaut d'infrastructure.
       - name: Sonde de concurrence
         env:
-          DATABASE_URL: postgres://aeerks:aeerks@localhost:5432/aeerks
+          SQL_HOST: localhost
+          SQL_USER: aeerks
+          SQL_PASSWORD: aeerks
+          SQL_DB_NAME: aeerks
         run: |
           cd backend
           node --import tsx test/probe-lost-update-fixed.mjs

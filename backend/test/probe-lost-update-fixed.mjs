@@ -1,7 +1,7 @@
 /**
  * Verifie que le verrou de ligne corrige le lost update sur le score.
  *
- * Ce fichier est lePendant de `probe-lost-update.mjs`, qui prouve le DEFAUT.
+ * Ce fichier est le pendant de `probe-lost-update.mjs`, qui prouve le DEFAUT.
  * Ici on rejoue EXACTEMENT le meme scenario deux fois :
  *
  *   variante « sans verrou »  -> reproduit le bug historique
@@ -99,6 +99,7 @@ async function concurrentScoring(lock) {
 }
 
 let failure = null;
+let infra = null;
 try {
   const iso = await db.execute(sql.raw('SHOW transaction_isolation'));
   console.log(`isolation level = ${iso.rows[0]?.transaction_isolation}`);
@@ -152,9 +153,15 @@ try {
     failure = new Error(`points perdus avec verrou : ${perduAvecVerrou}`);
   }
 } catch (err) {
-  failure = err;
-  console.error('ERREUR:', err?.message ?? err);
-  console.error('cause  :', err?.cause?.message ?? '(aucune)');
+  // Un defaut d'infrastructure et une regression du verrou ne doivent PAS
+  // ressembler. Le premier se corrige dans le workflow ; le second est un vrai
+  // defaut du code de score. La sonde a produit des runs rouges d'affilee pour
+  // une connexion refusee, sans qu'aucun journal ne distingue les deux
+  // hypotheses — donc c'est distingue ici, par le code de sortie.
+  infra = err;
+  console.error('ERREUR D\'INFRASTRUCTURE : la sonde n\'a pas pu s\'executer.');
+  console.error('  ', err?.message ?? err);
+  console.error('  cause :', err?.cause?.message ?? '(aucune)');
 } finally {
   if (created) {
     await db.execute(
@@ -163,4 +170,6 @@ try {
     console.log('\ntables jetables supprimees (aucune donnee de competition touchee)');
   }
 }
-process.exit(failure ? 1 : 0);
+// 0 = le verrou tient. 1 = le verrou ne tient pas (la verite reelle du defaut).
+// 2 = la sonde n'a pas demarre (pas de base, pas de reseau).
+process.exit(infra ? 2 : failure ? 1 : 0);
