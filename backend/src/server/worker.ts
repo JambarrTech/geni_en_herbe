@@ -5,7 +5,7 @@ import {
   startAuthoritativeTimerLoop,
   stopAuthoritativeTimerLoop,
 } from './matchEngine.ts';
-import { tryAcquireLeaderLock, workerInstanceId, type LeaderLock } from './leaderLock.ts';
+import { tryAcquireLeaderLock, workerInstanceId, estConnexionDirecte, type LeaderLock } from './leaderLock.ts';
 import { CONFIG } from '../config.ts';
 import { createLogger } from '../lib/logger.ts';
 import { renderMetrics } from '../lib/metrics.ts';
@@ -83,19 +83,30 @@ let retryTimer: NodeJS.Timeout | null = null;
  * y est attaché à une session serveur réassignable, donc le worker pourrait
  * croire être leader sans l'être. Mieux vaut un worker qui refuse de démarrer
  * qu'un worker qui corrompt l'état en silence (cf. leaderLock.ts).
+ *
+ * La reconnaissance est celle de `estConnexionDirecte` : elle couvre aussi
+ * l'endpoint pooler de Neon, identifié par son NOM D'HOTE et depourvu de
+ * toute option d'URL. Le message d'erreur nomme l'hote, parce que c'est la
+ * seule partie de l'URL que l'utilisateur peut comparer a ce qu'il a copie.
  */
 function assertDirectConnection(): boolean {
   const url = process.env.DATABASE_URL ?? '';
-  const pooled = /[?&]pgbouncer=true/i.test(url) || /[?&]pool_mode=transaction/i.test(url);
-  if (pooled) {
-    log.error(
-      'DATABASE_URL pointe vers un pooler en mode transaction. ' +
-        'Les verrous consultatifs y sont attaches a une session serveur reassignable : ' +
-        'le worker perdrait le verrou sans le savoir. Utilisez la connexion directe.'
-    );
-    return false;
+  if (estConnexionDirecte(url)) return true;
+
+  let hote = url;
+  try {
+    hote = new URL(url).hostname || url;
+  } catch {
+    /* URL illisible : on affiche telle quelle. */
   }
-  return true;
+  log.error(
+    'DATABASE_URL pointe vers un pooler en mode transaction. ' +
+      'Les verrous consultatifs y sont attaches a une session serveur reassignable : ' +
+      'le worker perdrait le verrou sans le savoir. Utilisez la connexion directe. ' +
+      `Hote detecte : ${hote}`,
+    { url }
+  );
+  return false;
 }
 
 async function tryBecomeLeader(): Promise<boolean> {

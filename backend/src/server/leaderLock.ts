@@ -61,12 +61,58 @@ const LOCK_KEY = 0x41454552; // « AEER » en ASCII
  * dire exactement l'etat dangereux qu'on voulait empecher.
  *
  * Verification a faire au deploiement : `DATABASE_URL` doit pointer vers la
- * connexion DIRECTE, sans parametre `pgbouncer=true`.
+ * connexion DIRECTE. Les deux formes de pooler se reconnaisent, et il faut les
+ * deux (cf. `estConnexionDirecte`) :
+ *  - par option d'URL : `pgbouncer=true`, `pool_mode=transaction` ;
+ *  - par NOM D'HOTE : l'endpoint pooler de Neon s'appelle `...-pooler....`
+ *    ou `....pooler....`, et son URL ne porte AUCUNE de ces options.
+ *
+ * Le second cas est celui qui compte en pratique : le tableau de bord Neon
+ * propose la chaine poolee juste a cote de la directe, sans la moindre option
+ * d'URL pour la distinguer. Un garde-fou qui ne reconnait que les options la
+ * laisse passer, et l'echec qu'il devait empecher se produit quand meme — mais
+ * sans le message qui aurait Explique pourquoi.
  *
  * Le worker ouvre sa propre connexion pour le verrou, hors du pool applicatif :
  * c'est deja le cas, et c'est ce qui rend cette contrainte respectee tant que
  * l'URL n'est pas un point d'entree de pooler.
  */
+
+/**
+ * Vrai si l'URL designe la connexion DIRECTE, et non un pooler en mode
+ * transaction.
+ *
+ * Les deux signatures sont reconnues :
+ *  - `pgbouncer=true` / `pool_mode=transaction` dans la chaine de requete ;
+ *  - un hote contenant le marqueur `pooler` (`ep-xxx-pooler...`,
+ *    `....us-east-2.pooler.neon.tech`), que Neon et Supabase emploient.
+ *
+ * Une URL illisible ne vaut pas rejet : on retombe alors sur la detection des
+ * options, qui est celle qui existait. Refuser ici empecherait le worker de
+ * demarrer sur une URL correcte mais atypique — un echec bruyant pour un
+ * probleme qui n'en est pas un.
+ *
+ * @param url la valeur de `DATABASE_URL`.
+ */
+export function estConnexionDirecte(url: string | undefined | null): boolean {
+  const valeur = url ?? '';
+  if (!valeur) return true;
+
+  // Les options d'URL, y compris sur une URL que `URL` ne sait pas parser.
+  if (/[?&]pgbouncer=true/i.test(valeur) || /[?&]pool_mode=transaction/i.test(valeur)) {
+    return false;
+  }
+
+  try {
+    // Le marqueur est recherche dans le HOTE seul, et delimite : un hote qui
+    // contiendrait « pooler » au milieu d'un mot ne doit pas declencher le
+    // refus. `ep-aaa-pooler.` et `.pooler.` sont les deux formes constatees.
+    const { hostname } = new URL(valeur);
+    return !/(^|[.-])pooler([.-]|$)/i.test(hostname);
+  } catch {
+    return true;
+  }
+}
 
 /**
  * Tente d'obtenir le verrou de leader.

@@ -46,6 +46,19 @@ voie de retour demeure documentée, et la CI en vérifie encore l'assemblage.
 
 - `DATABASE_URL` — l'URL Neon complète, avec `?sslmode=require`.
 
+> **Prenez la connexion directe, pas la « pooled ».** Le tableau de bord Neon
+> propose les deux côte à côte. Elles ne se distinguent pas dans l'URL : seule la
+> **directe** convient ici.
+>
+> La raison n'est pas le débit mais un verrou. `pg_try_advisory_lock` est
+> attaché à une **session** PostgreSQL ; derrière un pooler en mode transaction,
+> les sessions sont réassignées d'un client à l'autre. Le worker se croirait
+> leader en ayant perdu le verrou — et deux workers se disputeraient la même
+> ligne de match, l'un remettant le chrono à zéro pendant que l'autre avance.
+>
+> Le `worker` refuse donc de démarrer sur une URL de pooler, en journalisant
+> l'hôte détecté. Si ce message apparaît, collez l'autre chaîne.
+
 `WS_ALLOWED_ORIGINS` est écrite dans le blueprint (`value: ""`) : rien à saisir.
 
 ## Avant de commencer
