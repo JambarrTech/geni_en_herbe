@@ -103,7 +103,7 @@ traitement de requête long côté API ne peut pas figer la boucle de chrono.
 ## Création du service
 
 Le service tourne sur le **runtime Node natif** de Render : le dépôt ne
-contient plus de Dockerfile, et il ne voit que le dossier `backend/`.
+contient plus de Dockerfile, et Render clone le dépôt **en entier**.
 
 1. *New* → *Blueprint* → sélectionnez le dépôt. Render lit `render.yaml`.
 2. Renseignez `DATABASE_URL` (la seule variable à `sync: false`).

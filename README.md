@@ -30,10 +30,10 @@ un redéploiement de l'un n'affecte pas les autres.
 | `worker`    | 4002  | Boucle de chrono (tâche de fond, ~1 s)         | `GET /`                  |
 | `static`    | 4003  | Reverse proxy `/api` + `/ws`, **et** `apps/*/dist` s'il en existe — voir ci-dessous | `GET /__static_health`   |
 
-`static` a deux rôles selon l'installation : il **sert les trois écrans** quand
-`apps/*/dist` est présent (auto-hébergé, développement), et se limite au **relais
-`/api` + `/ws`** quand il n'y est pas — l'état normal du déploiement Render, où
-les écrans sont sur le CDN Vercel. Le rôle est déduit des fichiers présents,
+`static` a deux rôles selon l'installation : il **sert les trois écrans** et
+relaie `/api` + `/ws` quand `apps/*/dist` est présent — c'est l'état du
+déploiement Render, dont le build compile les interfaces — et se limite au
+**relais seul** quand il n'y est pas. Le rôle est déduit des fichiers présents,
 `STATIC_SERVE_APPS` permettant de le figer. Un build partiel fait **refuser le
 démarrage** : servir deux écrans sur trois sans le dire est le symptôme le plus
 cher à diagnostiquer de la plateforme.
