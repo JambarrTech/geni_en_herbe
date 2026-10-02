@@ -255,17 +255,27 @@ démarrer plutôt que de corrompre l'état.
 
 ## La mise en veille de l'offre gratuite
 
-Render endort un service gratuit après **15 minutes sans trafic entrant** (les
-messages WebSocket d'une connexion ouverte comptent). Le premier réveil prend
-**environ une minute**, pendant laquelle Render affiche une page de chargement.
+Render endort un service gratuit après **15 minutes sans trafic entrant** — les
+messages WebSocket d'une connexion ouverte comptent ([Render, *Deploy for
+Free*](https://render.com/docs/free)). Le premier réveil prend **environ une
+minute**, pendant laquelle Render affiche une page de chargement.
 
-C'est le principal défaut de l'offre gratuite, et il est assumé : pendant un
-tournoi, le jury et le public génèrent du trafic en continu, donc le service
-reste éveillé. Le risque réel est **avant** et **après** la session.
+Ce qui compte, précisément : le `timer_tick` n'est diffusé **que lorsque l'état
+change** (`server/matchEngine.ts`). Le service reste donc éveillé pendant que le
+chrono tourne, et s'endort en revanche entre deux questions, ou pendant une
+pause du jury de plus de 15 minutes. C'est là que le risque se situe, pas
+pendant le match.
+
+**La reprise est automatique.** Le service rendort se réveille, coupe les
+connexions (code 1001) et le client se reconnecte tout seul — c'est vérifié par
+un test, et c'est aussi le comportement qui rend l'offre gratuite exploitable.
+Il faut toutefois environ une minute sans écran vivant après le réveil.
 
 Si un service doit rester éveillé en permanence, un ping toutes les 10 minutes
 depuis un cron externe (cron-job.org, UptimeRobot — gratuits) suffit. Faites-le
-sur `/__static_health`, qui répond sans toucher à la base.
+sur `/__static_health`, qui répond sans toucher à la base. Un cron GitHub
+Actions ne convient pas : il est en retard de plusieurs dizaines de minutes
+quand la plateforme est chargée, ce qui annule l'intérêt.
 
 ## Après le premier déploiement
 
