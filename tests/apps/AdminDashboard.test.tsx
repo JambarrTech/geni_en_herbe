@@ -203,12 +203,26 @@ describe('AdminDashboard — suppression d’un match', () => {
     return view;
   }
 
-  /** Le bouton de confirmation du dialogue, pas celui qui l'ouvre. */
-  function boutonConfirmer(): HTMLElement {
-    const boutons = Array.from(document.querySelectorAll<HTMLElement>('dialog button'));
-    const danger = boutons.find((b) => b.textContent?.includes('Supprimer définitivement'));
-    if (!danger) throw new Error('le dialogue de suppression ne propose pas de confirmation');
-    return danger;
+  /**
+   * Le bouton de confirmation du dialogue OUVERT.
+   *
+   * Le libellé n'est qu'un filtre : c'est la restriction à `dialog[open]` qui
+   * fait la différence. Plusieurs `ConfirmDialog` sont montés en permanence
+   * (publication, annulation, suppression) et leurs boutons existent dans le
+   * DOM même quand leur dialogue est fermé — chercher « Supprimer
+   * définitivement » dans toute la page revenait donc à cliquer sur une
+   * suppression en croyant ouvrir autre chose, sans déclencher quoi que ce soit
+   * puisque la cible du dialogue fermé est nulle. Un test vert à l'écran et
+   * muet sur le réseau.
+   */
+  function boutonConfirmer(libelle = 'Supprimer définitivement'): HTMLElement {
+    const dialogue = document.querySelector<HTMLDialogElement>('dialog[open]');
+    if (!dialogue) throw new Error('aucun dialogue ouvert');
+    const bouton = Array.from(dialogue.querySelectorAll<HTMLElement>('button')).find((b) =>
+      b.textContent?.includes(libelle)
+    );
+    if (!bouton) throw new Error(`le dialogue ouvert ne propose pas « ${libelle} »`);
+    return bouton;
   }
 
   it('propose la suppression sur un match programmé', async () => {
@@ -273,6 +287,101 @@ describe('AdminDashboard — suppression d’un match', () => {
     fireEvent.click(annuler);
 
     expect(supprimer).not.toHaveBeenCalled();
+  });
+
+  it('propose d\'annuler un résultat, et de le rétablir sur un match annulé', async () => {
+    await mountAvecMatches([match(1, 'FINISHED', 2), match(2, 'CANCELLED', 3)]);
+
+    // Deux boutons distincts, jamais présents ensemble : c'est ce qui permet de
+    // voir d'un coup d'œil, dans une grille de six matchs, si un résultat pèse
+    // encore au classement. Un bouton unique dont l'effet dépendrait de l'état
+    // obligerait à lire l'état avant de cliquer.
+    expect(document.getElementById('btn-cancel-match-1')).not.toBeNull();
+    expect(document.getElementById('btn-restore-match-1')).toBeNull();
+
+    expect(document.getElementById('btn-restore-match-2')).not.toBeNull();
+    expect(document.getElementById('btn-cancel-match-2')).toBeNull();
+  });
+
+  it('n\'propose ni l\'un ni l\'autre sur un match programmé ou en cours', async () => {
+    await mountAvecMatches([match(1, 'SCHEDULED'), match(2, 'LIVE'), match(3, 'PAUSED')]);
+
+    // Un match programmé se SUPPRIME (rien à retirer du classement) ; un match en
+    // cours doit être terminé d'abord. Ni l'un ni l'autre n'a de résultat à
+    // annuler.
+    for (const id of [1, 2, 3]) {
+      expect(document.getElementById(`btn-cancel-match-${id}`)).toBeNull();
+      expect(document.getElementById(`btn-restore-match-${id}`)).toBeNull();
+    }
+  });
+
+  it('annule un résultat en annonçant ce qui n\'est PAS effacé', async () => {
+    const envoyer = vi.spyOn(api, 'post').mockResolvedValue({} as never);
+    await mountAvecMatches([match(7, 'FINISHED', 3)]);
+
+    fireEvent.click(document.getElementById('btn-cancel-match-7')!);
+    await waitFor(() => expect(boutonConfirmer('Annuler le résultat')).toBeTruthy());
+
+    // Le point entier de l'annulation est là : elle retire le match du
+    // classement SANS rien détruire. Un dialogue qui ne le dirait pas ferait
+    // croire à une suppression — donc à une perte définitive — et le comité
+    // n'oserait pas s'en servir.
+    const dialogue = document.querySelector('dialog[open]')!;
+    expect(dialogue.textContent).toContain('Annuler le résultat du match n° 3');
+    expect(dialogue.textContent).toContain("Rien n'est effacé");
+    expect(dialogue.textContent).toMatch(/journal d'audit/);
+    // Le score affiché l'est aussi : on conserve, on ne remet pas à zéro.
+    expect(dialogue.textContent).toContain('Score conservé');
+
+    fireEvent.click(boutonConfirmer('Annuler le résultat'));
+    await waitFor(() => expect(envoyer).toHaveBeenCalledWith('/api/matches/7/cancel'));
+  });
+
+  it('rétablit un résultat annulé', async () => {
+    const envoyer = vi.spyOn(api, 'post').mockResolvedValue({} as never);
+    await mountAvecMatches([match(7, 'CANCELLED', 3)]);
+
+    fireEvent.click(document.getElementById('btn-restore-match-7')!);
+    await waitFor(() => expect(boutonConfirmer('Rétablir')).toBeTruthy());
+    fireEvent.click(boutonConfirmer('Rétablir'));
+
+    await waitFor(() => expect(envoyer).toHaveBeenCalledWith('/api/matches/7/restore'));
+  });
+
+  it('affiche « Annulé » en toutes lettres sur un match annulé', async () => {
+    await mountAvecMatches([match(7, 'CANCELLED', 3)]);
+
+    // Ni « CANCELLED », ni l'ambre d'un match programmé : l'identifiant brut et
+    // cette couleur auraient rendu un résultat retiré visuellement identique à
+    // un match à venir — dans une grille où cette différence décide de ce qui
+    // part en publication.
+    const carte = document.getElementById('btn-restore-match-7')!.closest('div.bg-white')!;
+    expect(carte.textContent).toContain('Annulé');
+    expect(carte.textContent).not.toContain('CANCELLED');
+    expect(carte.textContent).not.toContain('FINISHED');
+
+    // Le texte ne suffit pas : c'est le trait qui la distingue au premier coup
+    // d'œil, quand on compare deux cartes côte à côte sans lire les libellés.
+    const badge = Array.from(carte.querySelectorAll('span')).find((s) => s.textContent === 'Annulé')!;
+    expect(badge.className).toContain('line-through');
+  });
+
+  it('remonte le refus du serveur sur une annulation impossible', async () => {
+    // Le serveur exige `FINISHED`. Un état qui change entre l'affichage et le clic
+    // — le jury relance le match pendant ce temps — ne peut pas être anticipé ici.
+    vi.spyOn(api, 'post').mockRejectedValue(
+      new Error('Seul un match terminé peut être annulé.')
+    );
+    await mountAvecMatches([match(7, 'FINISHED', 3)]);
+
+    fireEvent.click(document.getElementById('btn-cancel-match-7')!);
+    await waitFor(() => expect(boutonConfirmer('Annuler le résultat')).toBeTruthy());
+    fireEvent.click(boutonConfirmer('Annuler le résultat'));
+
+    await waitFor(() => {
+      const toast = document.getElementById('admin-toast-alert');
+      expect(toast?.textContent).toContain('Seul un match terminé');
+    });
   });
 
   it('remonte le refus du serveur au lieu d’un échec muet', async () => {
@@ -360,13 +469,15 @@ describe('AdminDashboard — suppression des équipes, questions et membres', ()
     mounted = null;
   });
 
-  /** Le bouton de confirmation du dialogue, pas celui qui l'ouvre. */
-  function boutonConfirmer(): HTMLElement {
-    const danger = Array.from(document.querySelectorAll<HTMLElement>('dialog button')).find((b) =>
-      b.textContent?.includes('Supprimer définitivement')
+  /** Le bouton de confirmation du dialogue OUVERT, pas celui d'un dialogue fermé. */
+  function boutonConfirmer(libelle = 'Supprimer définitivement'): HTMLElement {
+    const dialogue = document.querySelector<HTMLDialogElement>('dialog[open]');
+    if (!dialogue) throw new Error('aucun dialogue ouvert');
+    const bouton = Array.from(dialogue.querySelectorAll<HTMLElement>('button')).find((b) =>
+      b.textContent?.includes(libelle)
     );
-    if (!danger) throw new Error('le dialogue de suppression ne propose pas de confirmation');
-    return danger;
+    if (!bouton) throw new Error(`le dialogue ouvert ne propose pas « ${libelle} »`);
+    return bouton;
   }
 
   it('supprime une équipe après confirmation, en nommant la cible', async () => {

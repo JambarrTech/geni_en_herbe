@@ -26,6 +26,8 @@ import {
   CheckCircle2,
   Plus,
   Trash2,
+  Ban,
+  Undo2,
   Play,
   RotateCw,
   Sparkles,
@@ -46,6 +48,24 @@ type AdminTab =
   | 'results'
   | 'audit'
   | 'users';
+
+/**
+ * Statuts de match, en français et en couleur.
+ *
+ * L'identifiant brut était affiché tel quel (« CANCELLED »), et le badge
+ * reprenait une cascade à trois branches : tout ce qui n'était ni `LIVE` ni
+ * `FINISHED` sortait en ambre — couleur d'un match programmé. Un match ANNULÉ
+ * aurait donc eu exactement l'apparence d'un match à venir, dans une grille où
+ * la différence décide de ce qui part en publication.
+ */
+const STATUT_MATCH: Record<MatchItem['status'], { texte: string; classe: string }> = {
+  SCHEDULED: { texte: 'Programmé', classe: 'bg-amber-100 text-amber-800' },
+  READY: { texte: 'Prêt', classe: 'bg-amber-100 text-amber-800' },
+  LIVE: { texte: 'En cours', classe: 'bg-emerald-100 text-emerald-800 animate-pulse' },
+  PAUSED: { texte: 'En pause', classe: 'bg-amber-100 text-amber-800' },
+  FINISHED: { texte: 'Terminé', classe: 'bg-slate-100 text-slate-700' },
+  CANCELLED: { texte: 'Annulé', classe: 'bg-rose-100 text-rose-800 line-through' },
+};
 
 interface AdminTabDef {
   id: AdminTab;
@@ -400,6 +420,45 @@ export const AdminDashboard: React.FC = () => {
     },
     onEchec: (texte) => showToast(texte, 'error'),
   });
+
+  /**
+   * Annulation ou rétablissement d'un résultat.
+   *
+   * Un acte entièrement distinct de la suppression : celui-ci NE SUPPRIME RIEN.
+   * Il retire le match du classement et le fait disparaître des résultats, en
+   * laissant la ligne, les scores et le journal d'audit intacts. C'est la seule
+   * voie pour retirer un match joué, `DELETE` refusant (409) tout match scoré.
+   *
+   * D'où deux boutons plutôt qu'un interrupteur : « annuler » s'applique à un
+   * match terminé, « rétablir » à un match annulé. Un seul bouton dont l'effet
+   * dépend de l'état obligerait le comité à lire l'état pour savoir ce qu'il
+   * va faire.
+   */
+  const [decisionStatut, setDecisionStatut] = useState<{
+    match: MatchItem;
+    action: 'annuler' | 'retablir';
+  } | null>(null);
+
+  const confirmerDecisionStatut = async () => {
+    const enCours = decisionStatut;
+    if (!enCours) return;
+    // On referme avant d'envoyer, comme partout ailleurs dans cet écran.
+    setDecisionStatut(null);
+    try {
+      const annuler = enCours.action === 'annuler';
+      await api.post(`/api/matches/${enCours.match.id}/${annuler ? 'cancel' : 'restore'}`);
+      showToast(
+        annuler
+          ? `Résultat du match n° ${enCours.match.matchNumber} annulé`
+          : `Résultat du match n° ${enCours.match.matchNumber} rétabli`
+      );
+      // Le classement bouge dans les deux sens : le podium public change.
+      void fetchData();
+      void refreshLiveState();
+    } catch (err) {
+      showToast(errorMessage(err, 'Opération impossible'), 'error');
+    }
+  };
 
   const demanderSuppressionMatch = (m: MatchItem) => {
     suppression.demander({
@@ -1029,16 +1088,8 @@ export const AdminDashboard: React.FC = () => {
                       <span className="text-xs font-semibold uppercase px-2 py-0.5 rounded-md bg-blue-50 text-[#0B3B82]">
                         Match #{m.matchNumber}
                       </span>
-                      <span
-                        className={`text-[11px] font-bold px-2 py-0.5 rounded-md ${
-                          m.status === 'LIVE'
-                            ? 'bg-emerald-100 text-emerald-800 animate-pulse'
-                            : m.status === 'FINISHED'
-                            ? 'bg-slate-100 text-slate-700'
-                            : 'bg-amber-100 text-amber-800'
-                        }`}
-                      >
-                        {m.status}
+                      <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md ${STATUT_MATCH[m.status].classe}`}>
+                        {STATUT_MATCH[m.status].texte}
                       </span>
                     </div>
 
@@ -1061,6 +1112,34 @@ export const AdminDashboard: React.FC = () => {
                       Jury : {m.juryName || 'Non assigné'}
                     </span>
                     <div className="flex items-center gap-1.5 shrink-0">
+                      {/* Annulation / rétablissement. Présent selon l'état, et
+                          jamais en même temps : c'est le seul moyen, pour le
+                          comité, de voir d'un coup d'œil si ce match pèse encore
+                          au classement. */}
+                      {m.status === 'FINISHED' && (
+                        <button
+                          type="button"
+                          id={`btn-cancel-match-${m.id}`}
+                          onClick={() => setDecisionStatut({ match: m, action: 'annuler' })}
+                          aria-label={`Annuler le résultat du match n° ${m.matchNumber}`}
+                          title="Retirer ce résultat du classement. Le journal d'audit est conservé."
+                          className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-amber-700 hover:bg-amber-50 hover:border-amber-200 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-1"
+                        >
+                          <Ban className="w-3.5 h-3.5" aria-hidden="true" />
+                        </button>
+                      )}
+                      {m.status === 'CANCELLED' && (
+                        <button
+                          type="button"
+                          id={`btn-restore-match-${m.id}`}
+                          onClick={() => setDecisionStatut({ match: m, action: 'retablir' })}
+                          aria-label={`Rétablir le résultat du match n° ${m.matchNumber}`}
+                          title="Réintégrer ce résultat au classement"
+                          className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-emerald-700 hover:bg-emerald-50 hover:border-emerald-200 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-1"
+                        >
+                          <Undo2 className="w-3.5 h-3.5" aria-hidden="true" />
+                        </button>
+                      )}
                       {/* Seul cas désactivable : l'état du match est visible ici,
                           donc le serveur va refuser (400). Un match ayant un
                           historique de score (409) ne l'est pas — cette
@@ -1944,6 +2023,42 @@ export const AdminDashboard: React.FC = () => {
         onConfirm={() => void confirmUnpublishResults()}
         onCancel={() => setConfirmUnpublish(false)}
       />
+
+      {/* Annulation ou rétablissement d'un résultat.
+          `tone` par défaut, et c'est délibéré : l'acte est RÉVERSIBLE, et le
+          rétablissement est disponible juste à côté, sur la même carte. La
+          couleur d'alerte de la suppression dirait à tort « pas de retour en
+          arrière », alors que c'est précisément ce qui distingue les deux. */}
+      <ConfirmDialog
+        open={decisionStatut !== null}
+        title={
+          decisionStatut?.action === 'retablir'
+            ? `Rétablir le résultat du match n° ${decisionStatut.match.matchNumber} ?`
+            : `Annuler le résultat du match n° ${decisionStatut?.match.matchNumber} ?`
+        }
+        message={
+          decisionStatut?.action === 'retablir'
+            ? 'Ce match retrouvera sa place dans le classement et réapparaîtra dans les résultats.'
+            : "Ce match sortira du classement et disparaîtra des résultats. Rien n'est effacé : le score et le journal d'audit sont conservés, et le résultat pourra être rétabli."
+        }
+        confirmLabel={decisionStatut?.action === 'retablir' ? 'Rétablir' : 'Annuler le résultat'}
+        onConfirm={() => void confirmerDecisionStatut()}
+        onCancel={() => setDecisionStatut(null)}
+      >
+        {decisionStatut && (
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5">
+            <div className="text-[13px] font-semibold text-slate-900">
+              {decisionStatut.match.teamA?.name} contre {decisionStatut.match.teamB?.name}
+            </div>
+            <div className="mt-1 flex items-center justify-between text-[13px]">
+              <span className="font-semibold text-slate-700">Score conservé</span>
+              <span className="tabular-nums text-slate-900">
+                {decisionStatut.match.scoreA} – {decisionStatut.match.scoreB}
+              </span>
+            </div>
+          </div>
+        )}
+      </ConfirmDialog>
 
       {/* Suppression d'un match.
           `tone="danger"` : l'acte est irréversible, contrairement au retrait des

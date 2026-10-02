@@ -1022,6 +1022,144 @@ matchesRouter.post('/:id/finish', requireAuth, requireJuryOrAdmin, controlLimit,
   }
 });
 
+/**
+ * Annulation d'un match terminé.
+ *
+ * POURQUOI CELA EXISTE
+ * --------------------
+ * La suppression refuse (409) tout match ayant un historique de score, parce
+ * que `score_events` est en ON DELETE CASCADE : effacer le match effacerait le
+ * journal d'audit. Refus légitime — mais alors le comité n'avait AUCUNE façon de
+ * retirer un résultat dont il s'aperçoit après coup. Le message d'erreur
+ * proposait « annulez le match », et cette route n'existait pas.
+ *
+ * CE QUE « ANNULLÉ » SIGNIFIE, ET CE QUE ÇA NE SIGNIFIE PAS
+ * ----------------------------------------------------------
+ * Le statut `CANCELLED` existait déjà dans le schéma et était déjà compris par
+ * le reste du code. Deux conséquences, déjà en place avant cette route :
+ *
+ *  - `calculateRankings` ne compte que les matchs `FINISHED` : un match annulé
+ *    sort du classement. C'est le but.
+ *  - la publication refuse les matchs ni `FINISHED` ni `CANCELLED` : un match
+ *    annulé ne bloque donc pas la clôture de l'événement.
+ *
+ * Et ce que ça ne fait PAS : rien n'est effacé. La ligne, les scores et les
+ * `score_events` restent. C'est ce qui distingue une annulation d'une
+ * suppression — l'audit reste lisible, et `/restore` ramène le résultat.
+ *
+ * L'annulation est réversible par construction : voir la route suivante.
+ */
+matchesRouter.post('/:id/cancel', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const [match] = await db.select().from(matches).where(eq(matches.id, id));
+    if (!match) return res.status(404).json({ error: 'Match non trouvé' });
+
+    if (match.status === FLOW.MATCH_STATUS.CANCELLED) {
+      return res.status(400).json({ error: 'Ce match est déjà annulé' });
+    }
+
+    // Seul un match terminé s'annule. Un match en cours se termine d'abord — il
+    // porte peut-être un score en cours, et « terminer » puis « annuler » se
+    // voient dans le journal. Un match programmé, lui, se supprime : il n'a rien
+    // à retirer.
+    if (match.status !== FLOW.MATCH_STATUS.FINISHED) {
+      return res.status(400).json({
+        error:
+          'Seul un match terminé peut être annulé. ' +
+          'Un match en cours ou en pause doit d\'abord être terminé ; un match programmé se supprime directement.',
+      });
+    }
+
+    const [updated] = await db
+      .update(matches)
+      .set({
+        status: FLOW.MATCH_STATUS.CANCELLED,
+        updatedAt: new Date(),
+      })
+      .where(eq(matches.id, id))
+      .returning();
+
+    // Le score est conservé, et `endedAt` aussi : le match A bien eu lieu. Seule
+    // sa prise en compte disparaît. Effacer l'un des deux ferait dire « ce match
+    // n'a jamais existé », ce qui serait faux — et le journal d'audit mentirait.
+    await logAudit(
+      req.user?.uid,
+      req.user?.email,
+      'CANCEL_MATCH',
+      'match',
+      String(id),
+      `Annulation du match ${id} (n° ${updated.matchNumber}) — score conservé ${updated.scoreA}-${updated.scoreB}, retiré du classement`
+    );
+
+    // Le classement change : c'est tout l'intérêt de l'annulation. Isolé du
+    // `try` comme ailleurs — l'écriture est faite, une panne de diffusion ne
+    // doit pas se présenter comme un échec.
+    try {
+      broadcast('match_cancelled', { matchId: id, liveState: await getLiveState(updated.eventId, true) });
+    } catch (erreurDiffusion) {
+      log.error('Diffusion match_cancelled impossible', { err: erreurDiffusion });
+    }
+
+    res.json(updated);
+  } catch (error: any) {
+    log.error('Erreur annulation match', { err: error });
+    res.status(500).json({ error: 'Erreur lors de l\'annulation du match' });
+  }
+});
+
+/**
+ * Rétablissement d'un match annulé.
+ *
+ * Une annulation qui ne se reprend pas remplacerait le refus de suppression par
+ * un piège pire : on aurait échangé « impossible de retirer un résultat » contre
+ * « une annulation par erreur est définitive ». Les scores étant intacts, le
+ * retour arrière ne consiste qu'à leur redonner leur place.
+ *
+ * Le match redevient `FINISHED` : il réintègre le classement tel qu'il y était,
+ * score compris. Aucune autre écriture — rien n'avait bougé ailleurs.
+ */
+matchesRouter.post('/:id/restore', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const [match] = await db.select().from(matches).where(eq(matches.id, id));
+    if (!match) return res.status(404).json({ error: 'Match non trouvé' });
+
+    if (match.status !== FLOW.MATCH_STATUS.CANCELLED) {
+      return res.status(400).json({ error: 'Ce match n\'est pas annulé' });
+    }
+
+    const [updated] = await db
+      .update(matches)
+      .set({
+        status: FLOW.MATCH_STATUS.FINISHED,
+        updatedAt: new Date(),
+      })
+      .where(eq(matches.id, id))
+      .returning();
+
+    await logAudit(
+      req.user?.uid,
+      req.user?.email,
+      'RESTORE_MATCH',
+      'match',
+      String(id),
+      `Rétablissement du match ${id} (n° ${updated.matchNumber}) — score ${updated.scoreA}-${updated.scoreB} réintégré au classement`
+    );
+
+    try {
+      broadcast('match_restored', { matchId: id, liveState: await getLiveState(updated.eventId, true) });
+    } catch (erreurDiffusion) {
+      log.error('Diffusion match_restored impossible', { err: erreurDiffusion });
+    }
+
+    res.json(updated);
+  } catch (error: any) {
+    log.error('Erreur rétablissement match', { err: error });
+    res.status(500).json({ error: 'Erreur lors du rétablissement du match' });
+  }
+});
+
 matchesRouter.delete('/:id', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
@@ -1043,7 +1181,7 @@ matchesRouter.delete('/:id', requireAuth, requireAdmin, adminWriteLimit, async (
       return res.status(409).json({
         error:
           'Impossible de supprimer : ce match possède un historique de score. ' +
-          'Le journal d\'audit doit être conservé. Annulez le match ou contactez l\'administrateur système.',
+          'Le journal d\'audit doit être conservé. Annulez son résultat pour le retirer du classement.',
       });
     }
 
