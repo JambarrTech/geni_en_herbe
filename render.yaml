@@ -14,15 +14,21 @@
 # `/api` et `/ws` (cf. `backend/src/server/static.ts`), donc aucun second service
 # n'est nécessaire.
 #
-# RUNTIME NATIF, PAS D'IMAGE
-# ==========================
-# Ce service tourne sur le runtime Node de Render : le dépôt ne contient plus de
-# Dockerfile. Deux conséquences :
-#   - c'est `buildCommand` qui produit TOUT ce que `startCommand` sert — les
-#     trois applications Vite comme les dépendances du backend ;
+# RUNTIME NATIF, ROOT DIRECTORY = backend/
+# =========================================
+# Ce service tourne sur le runtime Node de Render et ne voit QUE le dossier
+# `backend/` (champ `rootDir`). Deux conséquences :
+#   - `buildCommand` n'installe que les dépendances du backend. Les trois
+#     applications Vite ne sont PLUS compilées ici : elles sont servies par le
+#     CDN Vercel (cf. docs/DEPLOIEMENT-VERCEL.md). Les compiler sur Render
+#     prenait une minute et ~200 Mo pour produire des fichiers que ce service
+#     ne sert pas ;
 #   - `tsx` est une dépendance de PRODUCTION du backend (cf.
 #     `backend/package.json`), puisqu'il est le chargeur qui exécute le
-#     superviseur. Une installation `--omit=dev` ne le retire donc pas.
+#     superviseur. Une installation `--omit=dev` ne le retirerait donc pas.
+#
+# `render.yaml` reste à la racine : Render ne lit un Blueprint que depuis la
+# racine du dépôt. C'est `rootDir` qui restreint le service au backend.
 #
 # Le pas-à-pas est dans `docs/DEPLOIEMENT-RENDER.md`.
 
@@ -32,20 +38,23 @@ services:
     runtime: node
     plan: free
 
-    # Deux arbres de dépendances : les workspaces (`apps/*`, à la racine) et le
-    # backend, qui possède son propre `package.json` et son propre verrou.
-    #
-    # `--include=dev` n'est pas une coquetterie : Render définit
-    # `NODE_ENV=production`, ce qui ferait omettre les dépendances de
-    # développement — dont `vite`, sans lequel les trois interfaces ne se
-    # compilent pas. Le backend n'a pas besoin de l'option : son unique outil de
-    # production, `tsx`, est déclaré dans `dependencies`.
-    buildCommand: npm ci --include=dev && npm run build && npm ci --prefix backend
+    # Le service ne connaît que `backend/`. Le dépôt est toujours cloné en
+    # entier — `rootDir` change le dossier courant des commandes de build et de
+    # démarrage, pas ce qui est disponible sur le disque.
+    rootDir: backend
 
-    # Le superviseur DOIT partir de `backend/` : il résout `tsx` à partir du
-    # dossier courant (`process.cwd()`) pour ses processus enfants. Lancé depuis
-    # la racine, le chargement de `tsx` échouerait.
-    startCommand: cd backend && npm run start:all
+    # Un seul arbre de dépendances, celui du backend : plus de double
+    # installation (workspaces racine + backend).
+    #
+    # `tsx` est en `dependencies` et non en `devDependencies` : c'est lui qui
+    # exécute le superviseur au démarrage, donc un `--omit=dev` ne doit pas
+    # pouvoir l'emporter. `drizzle-kit` reste en devDependency, ce qui est sans
+    # effet ici : les migrations s'appliquent à la main, depuis la machine.
+    buildCommand: npm ci
+
+    # Relativement à `rootDir`, le superviseur part déjà de `backend/` : il
+    # résout `tsx` à partir de `process.cwd()` pour ses processus enfants.
+    startCommand: npm run start:all
 
     # Sonde de Render. `/__static_health` est exposée par le processus `static`
     # et répond avant toute politique de sécurité : une sonde qui dépend de la
@@ -73,6 +82,13 @@ services:
     envVars:
       - key: DATABASE_URL
         sync: false
+      # Le processus `static` ne sert ici QUE /api, /ws et la sonde : les
+      # écrans sont sur le CDN Vercel. Le mode est aussi DÉDUIT de l'absence
+      # de `apps/*/dist`, mais le dire explicitement ferme le cas où un `dist/`
+      # traîne (build manuel, cache) : les deux versions se disputeraient le
+      # même chemin, et celle qui répondrait dépendrait d'un artefact.
+      - key: STATIC_SERVE_APPS
+        value: "false"
       - key: NODE_ENV
         value: production
       - key: LOG_LEVEL

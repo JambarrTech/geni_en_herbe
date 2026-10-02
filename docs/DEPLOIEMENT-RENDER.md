@@ -70,15 +70,70 @@ traitement de requête long côté API ne peut pas figer la boucle de chrono.
 ## Création du service
 
 Le service tourne sur le **runtime Node natif** de Render : le dépôt ne
-contient plus de Dockerfile, tout est produit par le `buildCommand` du
-blueprint.
+contient plus de Dockerfile, et il ne voit que le dossier `backend/`.
 
 1. *New* → *Blueprint* → sélectionnez le dépôt. Render lit `render.yaml`.
 2. Renseignez les deux variables à `sync: false` :
    - `DATABASE_URL` — l'URL Neon complète, avec `?sslmode=require` ;
    - `WS_ALLOWED_ORIGINS` — l'origine de l'interface, voir ci-dessous.
-3. *Apply*. Le premier déploiement compile les trois applications Vite, ce qui
-   prend quelques minutes.
+3. *Apply*.
+
+### `rootDir: backend` — Render ne voit que le backend
+
+Le champ `rootDir` restreint le service à `backend/`. C'est ce qui rend le
+découpage réel plutôt que déclaratif : **le dépôt est toujours cloné en entier**,
+`rootDir` change seulement le dossier courant des commandes de build et de
+démarrage — mais c'est suffisant pour que le service n'installe et ne serve que
+le backend.
+
+Conséquence directe sur le `buildCommand` :
+
+```yaml
+rootDir: backend
+buildCommand: npm ci          # et NON plus `npm ci --include=dev && npm run build`
+startCommand: npm run start:all
+```
+
+Les trois applications Vite ne sont **plus compilées sur Render** : elles sont
+servies par le CDN Vercel (voir
+[DEPLOIEMENT-VERCEL.md](DEPLOIEMENT-VERCEL.md)). Les compiler ici prenait une
+minute et environ 200 Mo par déploiement pour produire des fichiers que ce
+service ne sert pas.
+
+`tsx` est pour cette raison une **dépendance de production** du backend
+(`dependencies`, pas `devDependencies`) : c'est lui qui exécute le superviseur,
+et une installation qui l'ometterrait laisserait le service incapable de
+démarrer.
+
+### Le processus `static`, en relais seul
+
+Le processus `static` reste indispensable : c'est lui seul qui ouvre le port
+public, et il relaie `/api` et `/ws`. Sur Render il ne sert plus de fichiers.
+
+Son rôle est déduit de ce qu'il trouve sur le disque, et non d'une convention :
+
+| `apps/*/dist` | `STATIC_SERVE_APPS` | Comportement |
+|---|---|---|
+| les trois présents | (absent ou `true`) | sert les écrans **et** relaie |
+| aucun présent | (absent ou `false`) | **relais seul** — l'état normal sur Render |
+| une partie seulement | — | **refuse de démarrer** |
+
+Le refus du dernier cas est délibéré. Un build partiel produit un écran jury
+blanc alors que l'écran public fonctionne — le symptôme le plus cher à
+diagnostiquer de la plateforme, et le seul qui ne laisse rien dans les
+journaux du navigateur. Le blueprint fixe `STATIC_SERVE_APPS=false` pour que
+l'intention soit déclarative : un `dist/` résiduel (build manuel, cache) ne
+pourrait pas faire servir un écran par ce service alors qu'il est sur le CDN.
+
+Vérifiez ce que Render verra :
+
+```bash
+npm run render:check
+```
+
+Il contrôle notamment que `buildCommand` ne compile plus le frontend **et** que
+le service ne prétend pas le servir — les deux erreurs étant aussi muettes
+l'une que l'autre.
 
 ### `WS_ALLOWED_ORIGINS` : la variable qui décide du chrono
 
@@ -183,11 +238,30 @@ requête.
 
 ## Et Vercel ?
 
-Le dépôt contient toujours `vercel.json`, `scripts/assemble-vercel-dist.mjs` et
-`docs/DEPLOIEMENT-VERCEL.md`. Ce chemin est **documenté mais non déployé** : il
-supposerait le worker de chrono ailleurs, ce que le choix Render évite. Voir
+Ce n'est **pas** une alternative : c'est l'autre moitié du déploiement retenu.
+
+Ce service ne sert que `/api`, `/ws` et la boucle de chrono. Les trois écrans
+sont sur le CDN Vercel, qui relaie `/api` vers Render. Voir
+[DEPLOIEMENT-VERCEL.md](DEPLOIEMENT-VERCEL.md) et
 `docs/adr/ADR-0006-topologie-deploiement.md`.
 
-Si vous préférez ne garder qu'un seul chemin de déploiement, ces trois fichiers
-peuvent être supprimés : le dépôt fonctionne sans eux, et `npm run build`
-produit toujours les trois `dist` séparément.
+L'hôte du backend est saisi à **un seul endroit**, dans `vercel.json` :
+
+```bash
+npm run vercel:backend -- https://aeerks.onrender.com
+```
+
+Le relais `/api`, la directive `connect-src` de la CSP et le `VITE_WS_URL`
+injecté au build en découlent. Il reste deux actions sur les plateformes, et
+elles ne peuvent pas être automatisées depuis le dépôt :
+
+1. `WS_ALLOWED_ORIGINS` dans le dashboard Render — l'origine Vercel ;
+2. importer le dépôt dans Vercel, avec le dossier racine.
+
+### Ce qui reste possible sans Vercel
+
+Le mode auto-hébergé fonctionne toujours : `npm run build` à la racine produit
+les trois `dist`, et le processus `static` les sert sur le port 4003 en
+relaissant `/api` et `/ws`. Une seule origine, aucune variable à renseigner, et
+le canal temps réel passe par le même hôte — ce qui reste le mode le plus
+simple à exploiter le jour J, et probablement le bon pour une répétition.

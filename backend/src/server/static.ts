@@ -14,6 +14,79 @@ const log = createLogger('static');
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(currentDir, '..', '..', '..');
 
+// --- Ce que ce processus sait faire ----------------------------------------
+//
+// Deux rôles distincts pour le même processus, selon où sont les interfaces.
+//
+//   AUTO-HÉBERGÉ : les trois écrans sont servis ici, ET /api et /ws sont
+//   relayés. C'est le mode de développement et le déploiement.Render n'a pas
+//   plus ce rôle : les écrans y sont sur le CDN Vercel, et compiler les trois
+//   apps Vite pour un processus qui ne les sert pas coûtaient une minute de
+//   build et ~200 Mo par déploiement (cf. `render.yaml`, `rootDir: backend`).
+//   Il n'expose alors que `/api`, `/ws` et la sonde.
+//
+// Le mode se déduit des FICHIERS RÉELLEMENT présents, et non d'une convention :
+// c'est la seule information qui dise ce que ce processus peut faire, et elle
+// couvre les deux configurations sans rien paramétrer — un service qui se
+// tromperait de rôle répondrait 404 sur les écrans alors qu'ils sont ailleurs.
+// `STATIC_SERVE_APPS` permet de figer le comportement quand l'inférence serait
+// trompeuse.
+const appsRoot = path.join(PROJECT_ROOT, 'apps');
+const distOf = (name: string) => path.join(appsRoot, name, 'dist');
+
+const liveDist = distOf('live');
+const juryDist = distOf('jury');
+const adminDist = distOf('admin');
+
+const BUILDS: ReadonlyArray<{ nom: string; dist: string }> = [
+  { nom: 'live', dist: liveDist },
+  { nom: 'jury', dist: juryDist },
+  { nom: 'admin', dist: adminDist },
+];
+const presents = BUILDS.filter((b) => fs.existsSync(b.dist));
+const manquants = BUILDS.filter((b) => !fs.existsSync(b.dist)).map((b) => `apps/${b.nom}/dist`);
+
+const STATIC_SERVE_APPS = process.env.STATIC_SERVE_APPS?.trim().toLowerCase();
+let mode: 'apps' | 'relais';
+
+if (STATIC_SERVE_APPS === 'false') {
+  mode = 'relais';
+  log.info('Mode relais seul (STATIC_SERVE_APPS=false) : /api et /ws seulement.');
+} else if (STATIC_SERVE_APPS === 'true') {
+  if (manquants.length > 0) {
+    throw new Error(
+      `STATIC_SERVE_APPS=true exige les trois builds ; il(s) manque : ${manquants.join(', ')}.\n` +
+        `  Lancez \`npm run build\` à la racine, ou retirez STATIC_SERVE_APPS pour ` +
+        `basculer en relais seul.`
+    );
+  }
+  mode = 'apps';
+} else if (manquants.length === 0) {
+  mode = 'apps';
+} else if (presents.length === 0) {
+  // Aucun build : c'est l'état NORMAL de Render, donc ce n'est pas une
+  // anomalie. Logué en `info` et non en `warn` : un avertissement à chaque
+  // démarrage, dans un déploiement parfaitement sain, apprend à l'exploitant
+  // à ignorer les journaux — c'est-à-dire à ignorer le prochain, vrai.
+  mode = 'relais';
+  log.info(
+    "Mode relais seul : aucun build d'interface n'est présent. Les écrans sont " +
+      'servis par le CDN (cf. docs/DEPLOIEMENT-VERCEL.md) ; ce service expose ' +
+      '/api, /ws et la sonde.',
+    { ecrans: 'CDN', relais: '/api · /ws' }
+  );
+} else {
+  // Build partiel : jamais voulu. Servir deux écrans sur trois sans le dire
+  // produit exactement le symptôme le plus cher à diagnostiquer de la
+  // plateforme — un écran jury blanc alors que l'écran public marche, sans
+  // trace côté navigateur. On refuse de démarrer.
+  throw new Error(
+    `Build d'interfaces incomplet : ${manquants.join(', ')} — ${presents.length}/3 présents.\n` +
+      `  Relancez \`npm run build\` à la racine. Refuser de démarrer vaut mieux ` +
+      `qu'un écran manquant découvert le jour de la compétition.`
+  );
+}
+
 /**
  * Point d'entree HTTP des trois applications.
  *
@@ -84,6 +157,10 @@ server.on('request', (req, res) => {
       JSON.stringify({
         status: 'ok',
         service: 'AEERKS — statique',
+        // Le mode figure dans la sonde : c'est la seule façon, depuis le
+        // tableau de bord Render, de distinguer « le relais est cassé » de
+        // « ce service ne sert volontairement pas les écrans ».
+        mode: mode === 'apps' ? 'apps+relais' : 'relais',
         api: API_TARGET,
         ws: WS_TARGET,
         upstreamErrors,
@@ -140,8 +217,10 @@ function staticHandler(req: http.IncomingMessage, res: http.ServerResponse) {
 }
 
 // --- Fichiers statiques ----------------------------------------------------
-const appsRoot = path.join(PROJECT_ROOT, 'apps');
-const distOf = (name: string) => path.join(appsRoot, name, 'dist');
+//
+// Les chemins et le mode de service sont résolus en tête de module : la
+// détection doit précéder l'écoute, pour qu'un déploiement incomplet échoue au
+// démarrage et pas à la première requête.
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -155,21 +234,6 @@ const MIME: Record<string, string> = {
   '.woff2': 'woff2',
   '.map': 'application/json; charset=utf-8',
 };
-
-const liveDist = distOf('live');
-const juryDist = distOf('jury');
-const adminDist = distOf('admin');
-
-const missing: string[] = [];
-if (!fs.existsSync(liveDist)) missing.push('apps/live/dist');
-if (!fs.existsSync(juryDist)) missing.push('apps/jury/dist');
-if (!fs.existsSync(adminDist)) missing.push('apps/admin/dist');
-if (missing.length > 0) {
-  log.warn(
-    `Builds absents : ${missing.join(', ')}. Lancez \`npm run build\`.`,
-    { manquants: missing }
-  );
-}
 
 const setStaticHeaders = (filePath: string) => ({
   'Cache-Control': filePath.includes(`${path.sep}assets${path.sep}`)
@@ -200,6 +264,20 @@ function sendFile(res: http.ServerResponse, file: string) {
 }
 
 function serveStatic(url: string, res: http.ServerResponse) {
+  // Le mode fait autorité, et il est consulté AVANT toute lecture du disque.
+  //
+  // Sans cette garde, `STATIC_SERVE_APPS=false` ne serait qu'un libellé : les
+  // fichiers seraient servis dès qu'ils existeraient, et la variable
+  // annonce un rôle que le code ne tiendrait pas. Or c'est précisément le
+  // cas Render, où un `dist/` peut se trouver là (build manuel, cache, image
+  //whelée) alors que les écrans sont sur le CDN — les deux versions se
+  // disputeraient alors le même chemin, et celle qui répondrait dépendrait
+  // d'un artefact de build.
+  if (mode === 'relais') {
+    notServed(res);
+    return;
+  }
+
   const [pathname] = url.split('?');
 
   // Application concernée selon le préfixe.
@@ -226,16 +304,40 @@ function serveStatic(url: string, res: http.ServerResponse) {
     return;
   }
 
+  notServed(res);
+}
+
+/**
+ * 404 unique pour toute route d'écran non servie.
+ *
+ * Le message suit le mode. En relais seul, renvoyer « lancez npm run build »
+ * serait un mensonge utile : la commande a été suivie, le build a été fait, et
+ * il est ailleurs — sur le CDN. Un opérateur qui lit ça sur le tableau de bord
+ * Render partirait rebuilder pour rien.
+ */
+function notServed(res: http.ServerResponse) {
   res.statusCode = 404;
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-  res.end('404 — build absent. Lancez `npm run build` à la racine.');
+  res.end(
+    mode === 'relais'
+      ? "404 — ce service ne sert pas d'interface. Les écrans sont sur le CDN " +
+          "(/api et /ws restent joignables ici). Voir docs/DEPLOIEMENT-VERCEL.md."
+      : '404 — build absent. Lancez `npm run build` à la racine.'
+  );
 }
 
 const PORT = Number(process.env.STATIC_PORT) || CONFIG.STATIC_PORT;
 
 server.listen(PORT, '0.0.0.0', () => {
   log.info(`Point d'entrée sur http://0.0.0.0:${PORT}`, {
-    apps: '/ écran public · /jury · /admin',
+    mode: mode === 'apps' ? 'apps + relais' : 'relais seul',
+    // En relais seul, annoncer les trois écrans serait une fausse promesse :
+    // c'est précisément la ligne qui ferait diagnostiquer le CDN à la place du
+    // service, dans le mauvais sens.
+    ecrans:
+      mode === 'apps'
+        ? '/ écran public · /jury · /admin'
+        : 'CDN Vercel (non servies ici)',
     api: API_TARGET,
     ws: WS_TARGET,
   });

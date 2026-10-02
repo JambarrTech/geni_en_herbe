@@ -28,7 +28,15 @@ un redéploiement de l'un n'affecte pas les autres.
 | `api`       | 4000  | Routes REST `/api`                            | `GET /api/health`        |
 | `ws`        | 4001  | Diffusion temps réel `/ws`                    | `GET /`                  |
 | `worker`    | 4002  | Boucle de chrono (tâche de fond, ~1 s)         | `GET /`                  |
-| `static`    | 4003  | Sert `apps/*/dist` **+ reverse proxy**        | `GET /__static_health`   |
+| `static`    | 4003  | Reverse proxy `/api` + `/ws`, **et** `apps/*/dist` s'il en existe — voir ci-dessous | `GET /__static_health`   |
+
+`static` a deux rôles selon l'installation : il **sert les trois écrans** quand
+`apps/*/dist` est présent (auto-hébergé, développement), et se limite au **relais
+`/api` + `/ws`** quand il n'y est pas — l'état normal du déploiement Render, où
+les écrans sont sur le CDN Vercel. Le rôle est déduit des fichiers présents,
+`STATIC_SERVE_APPS` permettant de le figer. Un build partiel fait **refuser le
+démarrage** : servir deux écrans sur trois sans le dire est le symptôme le plus
+cher à diagnostiquer de la plateforme.
 
 Chaque port est surchargeable (`API_PORT`, `WS_PORT`, `WORKER_PORT`,
 `STATIC_PORT`), avec les valeurs par défaut dans `backend/src/config.ts`.
@@ -135,9 +143,9 @@ le code mort échoue à la compilation plutôt que de s'accumuler.
 La disposition retenue : **les trois interfaces sur Vercel, le backend sur Render**.
 
 ```
-aeerks.onrender.com/          → écran public, /jury, /admin, /api/* et /ws  (Render)
-*.vercel.app/                 → les trois interfaces (CDN)
+*.vercel.app/                 → écran public, /jury, /admin           (CDN)
              /api/*           → relayé par Vercel vers le backend
+aeerks.onrender.com/          → /api/*, /ws et la boucle de chrono    (Render)
 ```
 
 Ce découpage n'est pas un arbitraire : **le canal temps réel et la boucle de
@@ -149,6 +157,21 @@ ni connexion WebSocket entrante, ni processus de longue durée — les processus
 Guide pas-à-pas : [docs/DEPLOIEMENT-VERCEL.md](docs/DEPLOIEMENT-VERCEL.md) et
 [docs/DEPLOIEMENT-RENDER.md](docs/DEPLOIEMENT-RENDER.md).
 
+### Render ne voit que `backend/`
+
+Le blueprint déclare `rootDir: backend`, et son `buildCommand` ne fait que
+`npm ci`. Les trois applications Vite ne sont **plus compilées sur Render** : le
+service n'installe que le backend, et son processus `static` se limite au relais
+`/api` et `/ws`. Les écrans sont sur le CDN.
+
+C'était une minute de build et environ 200 Mo par déploiement pour des fichiers
+que ce service ne sert pas — le genre de coût qu'on ne remarque jamais parce
+qu'il ne produit aucune erreur.
+
+`tsx` est une dépendance de **production** du backend pour cette raison : c'est
+lui qui exécute le superviseur, et une installation qui l'ometterait
+empêcherait le service de démarrer.
+
 ### La variable qui casse le chrono en silence
 
 Si l'interface est sur Vercel, `WS_ALLOWED_ORIGINS` **doit** contenir l'origine
@@ -159,6 +182,10 @@ sans le moindre message d'erreur.
 ```bash
 npm run render:check    # affiche la valeur attendue et l'état du blueprint
 ```
+
+Il vérifie aussi que `buildCommand` ne compile pas le frontend **et** que le
+service ne prétend pas le servir : les deux erreurs sont aussi muettes l'une que
+l'autre.
 
 ### Le backend, en une commande
 
