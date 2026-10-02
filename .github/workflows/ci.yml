@@ -109,17 +109,28 @@ jobs:
       - name: Installer les dépendances
         run: npm ci
 
-      # Cet assemblage n'était vérifié par AUCUNE porte : un `VITE_BASE_PATH`
-      # faux ne fait pas échouer Vite, il produit trois pages blanches que seul
-      # un navigateur peut révéler. Le script échoue donc sur une référence
-      # d'asset absente de `dist/`, et cette étape le fait tourner.
+      # Ce chemin n'est PLUS le déploiement retenu — tout est servi depuis
+      # Render, en une seule origine — mais il reste dans le dépôt et demeure
+      # réversible. La CI continue donc de vérifier cet assemblage : une voie de
+      # retour non vérifiée se dégrade sans qu'on s'en aperçoive.
       #
-      # `--backend` fournit une origine de validation : `vercel.json` livré
-      # contient le marqueur `REMPLACER_PAR_TON_API` tant que le domaine n'est
-      # pas choisi, et le garde-fou doit alors refuser le déploiement — pas la
-      # vérification. On valide donc la mécanique (préfixes, assets, chemin de
-      # sortie) avec une origine synthétique.
+      # Elle n'était vérifiée par AUCUNE porte : un `VITE_BASE_PATH` faux ne fait
+      # pas échouer Vite, il produit trois pages blanches que seul un navigateur
+      # peut révéler. Le script échoue donc sur une référence d'asset absente de
+      # `dist/`, et cette étape le fait tourner.
+      #
+      # `VERCEL=1` est indispensable : `build.mjs` ne déduit plus l'URL du canal
+      # que sur Vercel, puisque le build Render est mono-origine et n'en a pas
+      # besoin. Sans cette variable, cette étape validerait un assemblage sans
+      # URL de canal — donc rien de comparable à ce que Vercel exécute.
+      # `VITE_WS_URL` fixe alors une origine synthétique, cohérente avec le
+      # `--backend` de l'assemblage : `vercel.json` livré peut encore porter le
+      # marqueur `REMPLACER_PAR_TON_API` tant que le domaine n'est pas choisi, et
+      # le garde-fou doit alors refuser le déploiement — pas la vérification.
       - name: Assembler dist/ et vérifier les références d'assets
+        env:
+          VERCEL: "1"
+          VITE_WS_URL: wss://validation.invalid
         run: |
           npm run build
           node scripts/assemble-vercel-dist.mjs --backend https://validation.invalid

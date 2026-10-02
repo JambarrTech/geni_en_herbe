@@ -14,21 +14,30 @@
 # `/api` et `/ws` (cf. `backend/src/server/static.ts`), donc aucun second service
 # n'est nécessaire.
 #
-# RUNTIME NATIF, ROOT DIRECTORY = backend/
-# =========================================
-# Ce service tourne sur le runtime Node de Render et ne voit QUE le dossier
-# `backend/` (champ `rootDir`). Deux conséquences :
-#   - `buildCommand` n'installe que les dépendances du backend. Les trois
-#     applications Vite ne sont PLUS compilées ici : elles sont servies par le
-#     CDN Vercel (cf. docs/DEPLOIEMENT-VERCEL.md). Les compiler sur Render
-#     prenait une minute et ~200 Mo pour produire des fichiers que ce service
-#     ne sert pas ;
-#   - `tsx` est une dépendance de PRODUCTION du backend (cf.
-#     `backend/package.json`), puisqu'il est le chargeur qui exécute le
-#     superviseur. Une installation `--omit=dev` ne le retirerait donc pas.
+# UNE SEULE ORIGINE, ET C'EST DÉLIBÉRÉ
+# ======================================
+# Tout est servi depuis `aeerks.onrender.com` : les trois interfaces par le
+# processus `static`, qui relaie `/api` et `/ws` vers `api` et `ws`.
 #
-# `render.yaml` reste à la racine : Render ne lit un Blueprint que depuis la
-# racine du dépôt. C'est `rootDir` qui restreint le service au backend.
+# Un CDN devant (Vercel) a été envisagé puis écarté. Le trafic vivant — WebSocket
+# et API — part sur Render dans les deux montages : le CDN ne mettrait en cache
+# que des fichiers statiques déjà petits, et ajouterait un relais sur chaque appel
+# API. Il aurait surtout introduit `WS_ALLOWED_ORIGINS`, une variable dont la
+# seule valeur fausse produit un refus en code 1008 — donc un chrono figé, sans
+# le moindre message. Le canal temps réel n'est pas le genre de chose qu'on
+# laisse dépendre d'une saisie dans un tableau de bord.
+#
+# Voir `docs/adr/ADR-0006-topologie-deploiement.md` et
+# `docs/DEPLOIEMENT-RENDER.md`.
+#
+# `vercel.json` et `scripts/assemble-vercel-dist.mjs` restent dans le dépôt, sans
+# être déployés : le chemin CDN demeure documenté et réversible.
+#
+# RUNTIME NATIF, PAS D'IMAGE
+# ==========================
+# Ce service tourne sur le runtime Node de Render : le dépôt ne contient plus de
+# Dockerfile. `buildCommand` produit donc TOUT ce que `startCommand` sert — les
+# trois applications Vite comme les dépendances du backend.
 #
 # Le pas-à-pas est dans `docs/DEPLOIEMENT-RENDER.md`.
 
@@ -38,23 +47,23 @@ services:
     runtime: node
     plan: free
 
-    # Le service ne connaît que `backend/`. Le dépôt est toujours cloné en
-    # entier — `rootDir` change le dossier courant des commandes de build et de
-    # démarrage, pas ce qui est disponible sur le disque.
-    rootDir: backend
-
-    # Un seul arbre de dépendances, celui du backend : plus de double
-    # installation (workspaces racine + backend).
+    # Deux arbres de dépendances, et c'est nécessaire : les workspaces
+    # (`apps/*`, à la racine) pour compiler les interfaces, le backend pour
+    # l'exécuter. Ils ont chacun leur verrou, donc chacun son `npm ci`.
     #
-    # `tsx` est en `dependencies` et non en `devDependencies` : c'est lui qui
-    # exécute le superviseur au démarrage, donc un `--omit=dev` ne doit pas
-    # pouvoir l'emporter. `drizzle-kit` reste en devDependency, ce qui est sans
-    # effet ici : les migrations s'appliquent à la main, depuis la machine.
-    buildCommand: npm ci
+    # `--include=dev` n'est pas une coquetterie : Render définit
+    # `NODE_ENV=production`, ce qui ferait omettre les dépendances de
+    # développement — dont `vite`, sans lequel aucune interface ne se compile.
+    buildCommand: npm ci --include=dev && npm run build && npm ci --prefix backend
 
-    # Relativement à `rootDir`, le superviseur part déjà de `backend/` : il
-    # résout `tsx` à partir de `process.cwd()` pour ses processus enfants.
-    startCommand: npm run start:all
+    # Le superviseur DOIT partir de `backend/` : il résout `tsx` à partir du
+    # dossier courant (`process.cwd()`) pour ses processus enfants. Lancé depuis
+    # la racine, le chargement de `tsx` échouerait.
+    #
+    # `tsx` est en `dependencies` du backend, pas en `devDependencies` : c'est
+    # lui qui exécute ce superviseur, et un `--omit=dev` à l'étape suivante
+    # laisserait le service incapable de démarrer.
+    startCommand: cd backend && npm run start:all
 
     # Sonde de Render. `/__static_health` est exposée par le processus `static`
     # et répond avant toute politique de sécurité : une sonde qui dépend de la
@@ -82,13 +91,6 @@ services:
     envVars:
       - key: DATABASE_URL
         sync: false
-      # Le processus `static` ne sert ici QUE /api, /ws et la sonde : les
-      # écrans sont sur le CDN Vercel. Le mode est aussi DÉDUIT de l'absence
-      # de `apps/*/dist`, mais le dire explicitement ferme le cas où un `dist/`
-      # traîne (build manuel, cache) : les deux versions se disputeraient le
-      # même chemin, et celle qui répondrait dépendrait d'un artefact.
-      - key: STATIC_SERVE_APPS
-        value: "false"
       - key: NODE_ENV
         value: production
       - key: LOG_LEVEL
@@ -99,27 +101,30 @@ services:
       # dès le premier bot.
       - key: TRUST_PROXY
         value: "true"
-      # À DÉFINIR DANS LE DASHBOARD RENDER. C'est la seule variable que ce
-      # blueprint ne peut pas préremplir, parce qu'elle dépend du domaine choisi
-      # pour l'interface.
+      # Vide = MÊME ORIGINE UNIQUEMENT, ce qui est exactement le déploiement
+      # retenu : l'interface est servie par ce service, donc le navigateur
+      # annonce l'origine de Render, et elle est automatiquement autorisée.
       #
-      # Le serveur de diffusion REFUSE toute connexion dont l'origine n'est pas
-      # dans la liste. Vide = même origine uniquement, ce qui suffit quand
-      # l'interface est servie par ce service lui-même.
+      # Cette valeur est donc écrite ici, et non laissée à définir dans le
+      # dashboard. C'est tout l'intérêt de la mono-origine : il n'y a AUCUNE
+      # variable à saisir, donc aucune occasion de se tromper.
       #
-      # Si l'interface est sur Vercel (docs/DEPLOIEMENT-VERCEL.md), le navigateur
-      # annonce l'origine Vercel, pas celle de Render : la valeur doit donc être
-      # l'origine Vercel, sans barre oblique finale.
+      # Ce qu'on évite, précisément : une liste d'origines à maintenir pour un
+      # déploiement à deux origines. Le serveur de diffusion refuse toute
+      # connexion dont l'origine n'est pas dans la liste, et ce refus est en
+      # code 1008 — le jury se connecte, mais le chrono ne descend pas, sans la
+      # moindre erreur visible ailleurs.
+      #
+      # Si un jour l'interface part sur un CDN (docs/DEPLOIEMENT-VERCEL.md), il
+      # faudra remplacer `""` par l'origine du CDN, sans barre oblique finale :
       #
       #     WS_ALLOWED_ORIGINS=https://aeerks.vercel.app
       #
-      # Symptôme d'une valeur absente ou incorrecte : la connexion est refusée en
-      # code 1008, le jury se connecte mais le chrono ne descend pas. Aucune erreur
-      # visible ailleurs — d'où l'importance de cette variable. `sync: false` est
-      # donc volontaire : elle rend le setting explicite plutôt que silencieusement
-      # vide.
+      # Renseigner la variable NE SUFFIT PAS : il faut aussi que `connect-src`
+      # de la CSP l'autorise, sinon c'est le navigateur qui bloque. Les deux
+      # se vérifient dans `npm run render:check`.
       - key: WS_ALLOWED_ORIGINS
-        sync: false
+        value: ""
 
       # AUCUNE variable NODE_OPTIONS, volontairement.
       #

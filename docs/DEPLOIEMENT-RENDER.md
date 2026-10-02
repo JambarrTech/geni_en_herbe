@@ -15,6 +15,39 @@ Aucune configuration de domaine supplémentaire, aucun CORS, aucun WebSocket
 cross-origin. C'est ce que le code fait déjà : le processus `static` sert les
 trois interfaces sous ces préfixes et relaie `/api` et `/ws`.
 
+## Pourquoi une seule origine
+
+C'est le choix qui décide de tout le reste, et il a été fait pour une raison
+seule : **`WS_ALLOWED_ORIGINS`**.
+
+Le serveur de diffusion refuse toute connexion dont l'origine n'est pas
+autorisée. En mono-origine, cette liste est vide et la connexion passe
+toujours — sans rien demander à personne.
+
+Avec un CDN devant (Vercel), le navigateur annonce l'origine du CDN, absente de
+la liste. La connexion est alors refusée **en code 1008** : le jury se connecte,
+le chrono ne descend pas, et aucun journal, aucune console, aucun code HTTP ne
+signale rien.
+
+Une liste d'origines à maintenir, dont la seule erreur se révèle le jour de la
+compétition, n'était pas un bon échange contre un cache de fichiers statiques.
+
+Le trafic vivant — WebSocket et API — part de toute façon sur Render dans les
+deux montages. Le CDN n'aurait amélioré que le chargement initial, et ajouté un
+relais sur chaque appel API.
+
+Voir `docs/adr/ADR-0006-topologie-deploiement.md`. `vercel.json` et
+`scripts/assemble-vercel-dist.mjs` restent dans le dépôt sans être déployés : la
+voie de retour demeure documentée, et la CI en vérifie encore l'assemblage.
+
+## Ce qu'il reste à configurer
+
+**Une seule variable**, dans le dashboard Render :
+
+- `DATABASE_URL` — l'URL Neon complète, avec `?sslmode=require`.
+
+`WS_ALLOWED_ORIGINS` est écrite dans le blueprint (`value: ""`) : rien à saisir.
+
 ## Avant de commencer
 
 **Changez le mot de passe de la base.** Il a été collé en clair dans une
@@ -73,57 +106,52 @@ Le service tourne sur le **runtime Node natif** de Render : le dépôt ne
 contient plus de Dockerfile, et il ne voit que le dossier `backend/`.
 
 1. *New* → *Blueprint* → sélectionnez le dépôt. Render lit `render.yaml`.
-2. Renseignez les deux variables à `sync: false` :
-   - `DATABASE_URL` — l'URL Neon complète, avec `?sslmode=require` ;
-   - `WS_ALLOWED_ORIGINS` — l'origine de l'interface, voir ci-dessous.
-3. *Apply*.
+2. Renseignez `DATABASE_URL` (la seule variable à `sync: false`).
+3. *Apply*. Le premier déploiement compile les trois applications Vite, ce qui
+   prend quelques minutes.
 
-### `rootDir: backend` — Render ne voit que le backend
+### Le `buildCommand` compile tout
 
-Le champ `rootDir` restreint le service à `backend/`. C'est ce qui rend le
-découpage réel plutôt que déclaratif : **le dépôt est toujours cloné en entier**,
-`rootDir` change seulement le dossier courant des commandes de build et de
-démarrage — mais c'est suffisant pour que le service n'installe et ne serve que
-le backend.
-
-Conséquence directe sur le `buildCommand` :
+Le service doit produire ce qu'il sert : les trois interfaces **et** les
+dépendances du backend. Deux `npm ci`, parce que le dépôt a deux verrous.
 
 ```yaml
-rootDir: backend
-buildCommand: npm ci          # et NON plus `npm ci --include=dev && npm run build`
-startCommand: npm run start:all
+buildCommand: npm ci --include=dev && npm run build && npm ci --prefix backend
+startCommand: cd backend && npm run start:all
 ```
 
-Les trois applications Vite ne sont **plus compilées sur Render** : elles sont
-servies par le CDN Vercel (voir
-[DEPLOIEMENT-VERCEL.md](DEPLOIEMENT-VERCEL.md)). Les compiler ici prenait une
-minute et environ 200 Mo par déploiement pour produire des fichiers que ce
-service ne sert pas.
+`--include=dev` n'est pas une coquetterie : Render définit `NODE_ENV=production`,
+ce qui ferait omettre les dépendances de développement — dont `vite`, sans
+lequel aucune interface ne se compile.
 
-`tsx` est pour cette raison une **dépendance de production** du backend
-(`dependencies`, pas `devDependencies`) : c'est lui qui exécute le superviseur,
-et une installation qui l'ometterrait laisserait le service incapable de
-démarrer.
+Le `cd backend` de `startCommand` est obligatoire : le superviseur résout `tsx`
+à partir du dossier courant pour ses processus enfants. `tsx` est en
+`dependencies` du backend, pas en `devDependencies`, parce que c'est lui qui
+exécute ce superviseur — un `--omit=dev` à l'étape suivante le retirerait et le
+service ne démarrerait pas.
 
-### Le processus `static`, en relais seul
+Il n'y a **pas** de `rootDir`. Le service doit compiler les interfaces, qui
+vivent à la racine du dépôt : restreint à `backend/`, il ne pourrait plus ni les
+produire, ni les servir.
 
-Le processus `static` reste indispensable : c'est lui seul qui ouvre le port
-public, et il relaie `/api` et `/ws`. Sur Render il ne sert plus de fichiers.
+### Le processus `static` : deux rôles selon l'installation
 
-Son rôle est déduit de ce qu'il trouve sur le disque, et non d'une convention :
+`static` est indispensable — c'est lui seul qui ouvre le port public, et il
+relaie `/api` et `/ws`. Son rôle se déduit des fichiers qu'il trouve :
 
-| `apps/*/dist` | `STATIC_SERVE_APPS` | Comportement |
-|---|---|---|
-| les trois présents | (absent ou `true`) | sert les écrans **et** relaie |
-| aucun présent | (absent ou `false`) | **relais seul** — l'état normal sur Render |
-| une partie seulement | — | **refuse de démarrer** |
+| `apps/*/dist` | Comportement |
+|---|---|
+| les trois présents | sert les écrans **et** relaie — le cas de Render |
+| aucun présent | relais seul (`/api`, `/ws`, sonde) |
+| une partie seulement | **refuse de démarrer** |
 
-Le refus du dernier cas est délibéré. Un build partiel produit un écran jury
+`STATIC_SERVE_APPS` permet de figer ce rôle à titre exceptionnel ; elle n'est pas
+dans le blueprint, la déduction étant le comportement correct.
+
+Le refus du dernier cas est délibéré : un build partiel produit un écran jury
 blanc alors que l'écran public fonctionne — le symptôme le plus cher à
-diagnostiquer de la plateforme, et le seul qui ne laisse rien dans les
-journaux du navigateur. Le blueprint fixe `STATIC_SERVE_APPS=false` pour que
-l'intention soit déclarative : un `dist/` résiduel (build manuel, cache) ne
-pourrait pas faire servir un écran par ce service alors qu'il est sur le CDN.
+diagnostiquer de la plateforme, et le seul qui ne laisse rien dans les journaux
+du navigateur.
 
 Vérifiez ce que Render verra :
 
@@ -131,37 +159,37 @@ Vérifiez ce que Render verra :
 npm run render:check
 ```
 
-Il contrôle notamment que `buildCommand` ne compile plus le frontend **et** que
-le service ne prétend pas le servir — les deux erreurs étant aussi muettes
-l'une que l'autre.
+Il lit la topologie depuis `buildCommand` et en déduit la valeur **correcte** de
+`WS_ALLOWED_ORIGINS` : vide en mono-origine, l'origine du CDN si un CDN revient.
+Il signale aussi un `rootDir` réapparu, qui empêcherait le service de produire ce
+qu'il doit servir.
 
-### `WS_ALLOWED_ORIGINS` : la variable qui décide du chrono
+### `WS_ALLOWED_ORIGINS` : vide, et c'est correct
 
 Le serveur de diffusion refuse toute connexion dont l'origine n'est pas
-autorisée. La valeur par défaut (`""`) n'autorise **que la même origine** — ce
-qui suffit quand l'interface est servie par Render lui-même.
+autorisée. La valeur `""` n'autorise **que la même origine** — donc exactement
+celle de Render, puisque les écrans y sont aussi. Rien à saisir, rien à
+maintenir.
 
-Si l'interface est déployée sur **Vercel** (voir
-[DEPLOIEMENT-VERCEL.md](DEPLOIEMENT-VERCEL.md)), le navigateur annonce
-l'origine Vercel et non celle de Render. La liste doit donc contenir cette
-origine, sans barre oblique finale :
+Elle est écrite dans le blueprint (`value: ""`) plutôt que laissée à définir dans
+le dashboard, pour que la décision soit dans le dépôt et pas dans une interface
+web.
 
-```
-WS_ALLOWED_ORIGINS=https://aeerks.vercel.app
-```
+> **Si un jour l'interface part sur un CDN**, remplacez `""` par l'origine du
+> CDN, sans barre oblique finale :
+> ```
+> WS_ALLOWED_ORIGINS=https://aeerks.vercel.app
+> ```
+> Renseigner la variable ne suffira pas : `connect-src` de la CSP devra aussi
+> l'autoriser, sinon c'est le navigateur qui bloque. Les deux se vérifient avec
+> `npm run render:check`.
 
-Deux origines si l_screen public et le jury sont sur des domaines différents —
+Deux origines si l'écran public et le jury sont sur des domaines différents —
 la liste est séparée par des virgules :
 
 ```
-WS_ALLOWED_ORIGINS=https://aeerks.vercel.app,https://jury.aeerks.sn
+WS_ALLOWED_ORIGINS=https://aeerks.onrender.com,https://jury.aeerks.sn
 ```
-
-> **Symptôme d'une valeur absente ou incorrecte :** le jury se connecte, le
-> chrono ne descend pas, et l'écran public affiche « Direct » puis se fige.
-> La connexion est refusée en code **1008**. Ce n'est ni un bug de build ni un
-> problème de base : vérifiez cette variable en premier.
-> `node scripts/check-render-blueprint.mjs` affiche sa valeur attendue.
 
 Pour vérifier que le canal fonctionne réellement :
 
@@ -238,30 +266,24 @@ requête.
 
 ## Et Vercel ?
 
-Ce n'est **pas** une alternative : c'est l'autre moitié du déploiement retenu.
+Le chemin Vercel reste **documenté et vérifié par la CI**, mais il n'est pas
+déployé. Ce document décrit donc l'état retenu ; [DEPLOIEMENT-VERCEL.md](DEPLOIEMENT-VERCEL.md)
+décrit l'autre, et ADR-0006 argumente le choix.
 
-Ce service ne sert que `/api`, `/ws` et la boucle de chrono. Les trois écrans
-sont sur le CDN Vercel, qui relaie `/api` vers Render. Voir
-[DEPLOIEMENT-VERCEL.md](DEPLOIEMENT-VERCEL.md) et
-`docs/adr/ADR-0006-topologie-deploiement.md`.
+Y revenir demande trois choses, toutes explicites — c'est le prix d'une voie de
+sortie, et la raison pour laquelle on l'a conservée plutôt que supprimée :
 
-L'hôte du backend est saisi à **un seul endroit**, dans `vercel.json` :
+1. `render.yaml` : retirer le build des interfaces et remettre
+   `WS_ALLOWED_ORIGINS` à définir dans le dashboard, avec l'origine Vercel ;
+2. `vercel.json` : renseigner l'hôte du backend ;
+3. importer le dépôt dans Vercel, dossier racine.
 
-```bash
-npm run vercel:backend -- https://aeerks.onrender.com
-```
+`npm run render:check` signale chacune de ces divergences au lieu de les laisser
+apparaître en production.
 
-Le relais `/api`, la directive `connect-src` de la CSP et le `VITE_WS_URL`
-injecté au build en découlent. Il reste deux actions sur les plateformes, et
-elles ne peuvent pas être automatisées depuis le dépôt :
+### Le mode auto-hébergé, lui, fonctionne toujours
 
-1. `WS_ALLOWED_ORIGINS` dans le dashboard Render — l'origine Vercel ;
-2. importer le dépôt dans Vercel, avec le dossier racine.
-
-### Ce qui reste possible sans Vercel
-
-Le mode auto-hébergé fonctionne toujours : `npm run build` à la racine produit
-les trois `dist`, et le processus `static` les sert sur le port 4003 en
-relaissant `/api` et `/ws`. Une seule origine, aucune variable à renseigner, et
-le canal temps réel passe par le même hôte — ce qui reste le mode le plus
-simple à exploiter le jour J, et probablement le bon pour une répétition.
+`npm run build` à la racine produit les trois `dist`, et `static` les sert sur
+4003 en relaissant `/api` et `/ws`. Une seule origine, aucune variable, aucun
+déploiement : le mode le plus simple à exploiter le jour J, et probablement le
+bon pour une répétition.

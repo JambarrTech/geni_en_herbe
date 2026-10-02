@@ -16,24 +16,29 @@ import {
   parGravite,
 } from '../../scripts/render-blueprint.mjs';
 
-/** Blueprint de référence : la configuration réellement déployée. */
+/** Blueprint de référence : la configuration réellement déployée (mono-origine). */
 const BLUEPRINT = {
   services: [
     {
       type: 'web',
       runtime: 'node',
       plan: 'free',
-      rootDir: 'backend',
-      buildCommand: 'npm ci',
-      startCommand: 'npm run start:all',
+      buildCommand: 'npm ci --include=dev && npm run build && npm ci --prefix backend',
+      startCommand: 'cd backend && npm run start:all',
       healthCheckPath: '/__static_health',
       envVars: [
         { key: 'DATABASE_URL', sync: false },
-        { key: 'STATIC_SERVE_APPS', value: 'false' },
-        { key: 'WS_ALLOWED_ORIGINS', sync: false },
+        { key: 'WS_ALLOWED_ORIGINS', value: '' },
       ],
     },
   ],
+};
+
+/** Montage « CDN devant », qui reste possible et reste diagnostiqué. */
+const AVEC_CDN = {
+  buildCommand: 'npm ci',
+  startCommand: 'cd backend && npm run start:all',
+  envVars: [{ key: 'WS_ALLOWED_ORIGINS', value: '' }],
 };
 
 /** Clone assez profond pour modifier un service sans toucher au modèle. */
@@ -64,60 +69,71 @@ test('compileLeFrontend — une valeur absente ne leve pas', () => {
 
 // --- auditRoleService -------------------------------------------------------
 
-test('auditRoleService — relais seul + install seule : coherent', () => {
-  const r = auditRoleService({ buildCommand: 'npm ci', serveApps: 'false' });
+test('auditRoleService — mono-origine : coherent', () => {
+  const r = auditRoleService({ buildCommand: BLUEPRINT.services[0].buildCommand });
   assert.equal(r.level, 'ok');
+  assert.match(r.text, /aucune variable/);
 });
 
-test('auditRoleService — relais seul + build frontend : avertissement', () => {
-  // L'erreur la plus coûteuse ici est invisible au déploiement : le build
-  // passe, la sonde est verte, et chaque déploiement gaspille une minute.
+test('auditRoleService — STATIC_SERVE_APPS=false contre un build : avertissement', () => {
+  // Configuration impossible : les écrans seraient produits puis ignorés, et
+  // chaque route répondrait 404. Ni le build ni la sonde ne le signalent.
   const r = auditRoleService({ buildCommand: 'npm ci && npm run build', serveApps: 'false' });
   assert.equal(r.level, 'warn');
-  assert.match(r.text, /CDN/);
+  assert.match(r.text, /404/);
 });
 
-test('auditRoleService — sert les ecrans + build frontend : coherent', () => {
-  assert.equal(
-    auditRoleService({ buildCommand: 'npm ci && npm run build', serveApps: 'true' }).level,
-    'ok'
-  );
-});
-
-test('auditRoleService — sert les ecrans SANS build : bloquant', () => {
-  // Le processus refuse de démarrer (build partiel), donc mieux vaut le dire
-  // ici qu'attendre le premier déploiement.
-  const r = auditRoleService({ buildCommand: 'npm ci', serveApps: 'true' });
-  assert.equal(r.level, 'ko');
-});
-
-test('auditRoleService — variable absente : deduction signalee', () => {
+test('auditRoleService — pas de build des ecrans : renvoi vers le montage CDN', () => {
   const r = auditRoleService({ buildCommand: 'npm ci', serveApps: undefined });
   assert.equal(r.level, 'warn');
-  assert.match(r.text, /DÉDUIT/);
+  assert.match(r.text, /CDN/);
+  // Le renvoi doit nommer la consequence operationnelle, pas seulement le
+  // montage : c'est elle qui fera agir.
+  assert.match(r.text, /WS_ALLOWED_ORIGINS/);
 });
 
 // --- auditOriginsWs ---------------------------------------------------------
 
-test('auditOriginsWs — absente : bloquant', () => {
-  assert.equal(auditOriginsWs([]).level, 'ko');
+test('auditOriginsWs — absente : signalee, non bloquante', () => {
+  // Absente, elle retombe sur le défaut du serveur (même origine), ce qui est
+  // correct ici. Mais la décision vaut mieux écrite dans le dépôt.
+  assert.equal(auditOriginsWs([], { monoOrigine: true }).level, 'warn');
 });
 
-test('auditOriginsWs — a definir au dashboard : rappel du piege 1008', () => {
-  const r = auditOriginsWs([{ key: 'WS_ALLOWED_ORIGINS', sync: false }]);
-  assert.match(r.text, /dashboard/);
+test('auditOriginsWs — vide EN MONO-ORIGINE : correct', () => {
+  // C'est LE cas du déploiement retenu. Un audit qui signalerait ici crierait
+  // au.sys sur une configuration parfaitement juste, et l'on s'habituerait à
+  // ignorer ses avertissements.
+  const r = auditOriginsWs([{ key: 'WS_ALLOWED_ORIGINS', value: '' }], { monoOrigine: true });
+  assert.equal(r.level, 'ok');
+});
+
+test('auditOriginsWs — vide AVEC CDN : le piege 1008', () => {
+  // La même valeur, la seule topologie change, et le verdict s'inverse. C'est
+  // exactement le mode de panne que la mono-origine supprime : un refus
+  // silencieux qui se manifeste en chrono figé.
+  const r = auditOriginsWs([{ key: 'WS_ALLOWED_ORIGINS', value: '' }], { monoOrigine: false });
+  assert.equal(r.level, 'warn');
   assert.match(r.text, /1008/);
 });
 
-test('auditOriginsWs — vide : signale pour un deploiement a deux origines', () => {
-  // Une liste vide autorise la meme origine seulement. Avec Vercel en face,
-  // c'est un refus systematique du WebSocket.
-  const r = auditOriginsWs([{ key: 'WS_ALLOWED_ORIGINS', value: '' }]);
-  assert.match(r.text, /Vercel/);
+test('auditOriginsWs — a definir au dashboard : consigne adaptee a la topologie', () => {
+  const avecCdn = auditOriginsWs([{ key: 'WS_ALLOWED_ORIGINS', sync: false }], {
+    monoOrigine: false,
+  });
+  assert.match(avecCdn.text, /dashboard/);
+  assert.match(avecCdn.text, /1008/);
+
+  // En mono-origine, la consigne est l'inverse : vide suffit.
+  const mono = auditOriginsWs([{ key: 'WS_ALLOWED_ORIGINS', sync: false }], { monoOrigine: true });
+  assert.match(mono.text, /VIDE suffit/);
 });
 
 test('auditOriginsWs — renseignee : aucune reserve', () => {
-  const r = auditOriginsWs([{ key: 'WS_ALLOWED_ORIGINS', value: 'https://aeerks.vercel.app' }]);
+  const r = auditOriginsWs(
+    [{ key: 'WS_ALLOWED_ORIGINS', value: 'https://aeerks.vercel.app' }],
+    { monoOrigine: false }
+  );
   assert.equal(r.level, 'ok');
 });
 
@@ -125,7 +141,9 @@ test('auditOriginsWs — un seul constat, pour rester avec son sujet', () => {
   // Le tri par gravite reordonne la liste : deux constats pour un meme sujet
   // s'afficheraient dans le desordre, l'avertissement avant la ligne qui dit
   // de quoi il parle.
-  assert.ok(!Array.isArray(auditOriginsWs([{ key: 'WS_ALLOWED_ORIGINS', value: '' }])));
+  assert.ok(
+    !Array.isArray(auditOriginsWs([{ key: 'WS_ALLOWED_ORIGINS', value: '' }], { monoOrigine: true }))
+  );
 });
 
 // --- auditBlueprint ---------------------------------------------------------
@@ -151,9 +169,21 @@ test('auditBlueprint — commandes absentes : chacune son constat', () => {
   assert.equal(estIncoherent(findings), true);
 });
 
-test('auditBlueprint — rootDir inattendu signale', () => {
-  assert.equal(estIncoherent(auditBlueprint(avec({ rootDir: 'apps/api' })).findings), false);
-  assert.match(texte(auditBlueprint(avec({ rootDir: 'apps/api' })).findings), /apps\/api/);
+test('auditBlueprint — rootDir signale comme incompatible avec la mono-origine', () => {
+  // Le service doit compiler les interfaces, qui vivent à la racine. S'il se
+  // restreint à `backend/`, il ne peut ni les compiler ni les servir.
+  const { findings } = auditBlueprint(avec({ rootDir: 'backend' }));
+  assert.match(texte(findings), /rootDir = "backend"/);
+  assert.match(texte(findings), /mono-origine/);
+});
+
+test('auditBlueprint — le montage CDN reste diagnostiquable', () => {
+  // Le chemin Vercel n'est plus déployé mais reste dans le dépôt : s'il
+  // réapparaît, l'audit doit dire ce qu'il coûte, pas seulement le fait.
+  const { findings } = auditBlueprint(avec(AVEC_CDN));
+  const t = texte(findings);
+  assert.match(t, /CDN/);
+  assert.match(t, /1008/);
 });
 
 test('auditBlueprint — envVars absent ne leve pas', () => {

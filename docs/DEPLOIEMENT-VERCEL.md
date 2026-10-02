@@ -1,8 +1,17 @@
 # Déploiement : un projet Vercel pour les trois interfaces
 
-Ce document décrit la mise en production retenue : **un seul projet Vercel** qui
-sert les trois interfaces, le backend restant sur un hôte de processus
-permanents.
+> **Ce chemin n'est pas le déploiement retenu.** Tout est servi depuis Render,
+> en une seule origine — voir [DEPLOIEMENT-RENDER.md](DEPLOIEMENT-RENDER.md).
+> Ce document est conservé parce qu'il est **vérifié par la CI** : revenir à un
+> CDN devant est alors un choix documenté plutôt qu'une reconstruction.
+>
+> Raison de l'écarter : `WS_ALLOWED_ORIGINS`. Le serveur de diffusion refuse
+> toute connexion dont l'origine n'est pas autorisée, et ce refus arrive en code
+> 1008 — le jury se connecte, le chrono ne descend pas, sans aucun message.
+> Une liste d'origines à maintenir, dont la seule erreur se révèle le jour de la
+> compétition, ne valait pas le cache de fichiers statiques qu'un CDN apporte.
+
+Ce document décrit donc une **voie de sortie**, complète et réversible.
 
 ```
 geni_en_herbe.vercel.app/         → écran public (live)
@@ -67,6 +76,16 @@ explicitement :
 
 Le relais de `/api` par Vercel est volontaire : le navigateur ne voit qu'une
 seule origine, donc le backend n'a besoin d'aucune configuration CORS.
+
+## Étape 0 — Ce que le blueprint Render ne permet plus
+
+Sur Render, ce chemin suppose que le service **ne serve plus les interfaces**.
+Deux changements sont donc nécessaires, et `npm run render:check` les signale
+tout seuls s'ils manquent :
+
+1. le `buildCommand` ne doit plus compiler les interfaces (le service n'a pas
+   à produire ce qu'il ne sert pas) ;
+2. `WS_ALLOWED_ORIGINS` doit porter l'origine Vercel — `""` la refuserait.
 
 ## Étape 1 — Renseigner l'adresse du backend
 

@@ -23,28 +23,45 @@ const BASE_PATHS = {
 /**
  * `VITE_WS_URL` : déduit de `vercel.json`, et non plus saisi à la main.
  *
- * Tant que l'interface est servie par le backend lui-même, la variable doit
- * rester ABSENTE : `shared/lib/wsUrl.ts` suit alors l'origine de la page, ce
- * qui est le comportement correct en auto-hébergement.
+ * Tant que l'interface est servie par le backend lui-même — le déploiement
+ * retenu, mono-origine — la variable doit rester ABSENTE : `shared/lib/wsUrl.ts`
+ * suit alors l'origine de la page, ce qui est le comportement correct et ne
+ * demande rien à personne.
  *
- * Elle ne doit être positionnée que lorsque l'interface est déployée ailleurs
- * que l'API — donc sur Vercel. Plutôt que de la faire saisir dans le tableau
- * de bord (une valeur invisible du build ET du garde-fou de cohérence, dont
- * l'oubli ne se manifeste qu'en plein match, chrono figé), on la déduit de
- * l'hôte que `vercel.json` déclare déjà. Une valeur, une saisie.
+ * Elle n'est requise que si l'interface est déployée ailleurs que l'API, donc
+ * sur Vercel. Plutôt que de la faire saisir dans le tableau de bord (une valeur
+ * invisible du build ET du garde-fou de cohérence, dont l'oubli ne se manifeste
+ * qu'en plein match, chrono figé), on la déduit de l'hôte que `vercel.json`
+ * déclare déjà.
+ *
+ * LE GARD `VERCEL`
+ * ----------------
+ * Vercel positionne `VERCEL` dans tous ses builds. Sans cette condition, la
+ * déduction s'exécutait aussi sur le build Render : celui-ci dépendait alors
+ * d'un fichier Vercel pour produire un bundle qui n'a rien à voir avec Vercel.
+ *
+ * Le résultat restait juste par coïncidence — le même hôte — et c'est
+ * précisément ce qui rendait la dépendance invisible. Une coïncidence correcte
+ * reste une dépendance : le jour où le domaine change, le build Render aurait
+ * embarqué une URL périmée sans qu'aucun contrôle ne le remarque.
  */
 async function resolveWsUrlEnv() {
   if (process.env.VITE_WS_URL?.trim()) {
     return { VITE_WS_URL: process.env.VITE_WS_URL.trim() };
   }
 
+  // Hors Vercel, le déploiement est mono-origine : rien à déduire.
+  if (!process.env.VERCEL) {
+    return {};
+  }
+
   const config = await readFile(path.resolve('vercel.json'), 'utf8');
 
-  // `vercel.json` porte le marqueur tant que le domaine n'est pas choisi. C'est
-  // NORMAL en développement et dans le build Render, où l'interface et l'API
-  // partagent une origine : le garde-fou doit alors se taire au lieu de faire
-  // échouer un build légitime. Il parle au bon moment — à l'assemblage de
-  // `dist/` pour Vercel, qui refuse de livrer un canal temps réel non configuré.
+  // `vercel.json` porte le marqueur tant que le domaine n'est pas choisi. Ce
+  // qui peut arriver en local, où l'interface et l'API partagent une origine.
+  // Le garde-fou doit alors se taire au lieu de faire échouer un build
+  // légitime. Il parle au bon moment — à l'assemblage de `dist/` pour Vercel,
+  // qui refuse de livrer un canal temps réel non configuré.
   //
   // Le test précède l'appel parce que `resolveBackendOrigin` lève au lieu de
   // rendre la main quand le marqueur est présent.

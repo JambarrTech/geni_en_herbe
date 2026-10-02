@@ -140,63 +140,56 @@ le code mort échoue à la compilation plutôt que de s'accumuler.
 
 ## Déploiement
 
-La disposition retenue : **les trois interfaces sur Vercel, le backend sur Render**.
+**Tout sur Render, une seule origine.** Une seule variable à saisir.
 
 ```
-*.vercel.app/                 → écran public, /jury, /admin           (CDN)
-             /api/*           → relayé par Vercel vers le backend
-aeerks.onrender.com/          → /api/*, /ws et la boucle de chrono    (Render)
+https://aeerks.onrender.com/          → écran public
+https://aeerks.onrender.com/jury      → écran jury
+https://aeerks.onrender.com/admin     → administration
+https://aeerks.onrender.com/api/...   → API REST
+wss://aeerks.onrender.com/ws          → diffusion temps réel
 ```
 
-Ce découpage n'est pas un arbitraire : **le canal temps réel et la boucle de
-chrono ne peuvent pas tourner sur une fonction serverless**. Vercel n'accepte
-ni connexion WebSocket entrante, ni processus de longue durée — les processus
-`ws` et `worker` sont donc sur l'hôte de processus permanents, tandis que les
-52 endpoints REST et les sessions étant déjà sans état, l'API suit n'importe où.
+Pas de CDN devant, pas de CORS, pas d'origine à autoriser.
 
-Guide pas-à-pas : [docs/DEPLOIEMENT-VERCEL.md](docs/DEPLOIEMENT-VERCEL.md) et
-[docs/DEPLOIEMENT-RENDER.md](docs/DEPLOIEMENT-RENDER.md).
+### Pourquoi une seule origine
 
-### Render ne voit que `backend/`
+Le choix tient à une seule variable, `WS_ALLOWED_ORIGINS`. Le serveur de
+diffusion refuse toute connexion dont l'origine n'est pas autorisée, et ce refus
+arrive **en code 1008** : le jury se connecte, le chrono ne descend pas, et aucun
+journal ni code HTTP ne signale rien.
 
-Le blueprint déclare `rootDir: backend`, et son `buildCommand` ne fait que
-`npm ci`. Les trois applications Vite ne sont **plus compilées sur Render** : le
-service n'installe que le backend, et son processus `static` se limite au relais
-`/api` et `/ws`. Les écrans sont sur le CDN.
+En mono-origine, la liste est vide et la connexion passe toujours — sans rien
+demander à personne. Avec un CDN devant, il faudrait maintenir une liste
+d'origines dont la seule erreur se révèle le jour de la compétition.
 
-C'était une minute de build et environ 200 Mo par déploiement pour des fichiers
-que ce service ne sert pas — le genre de coût qu'on ne remarque jamais parce
-qu'il ne produit aucune erreur.
+Le trafic vivant part de toute façon sur Render dans les deux montages : le CDN
+n'aurait amélioré que le chargement initial, et ajouté un relais sur chaque appel
+API.
 
-`tsx` est une dépendance de **production** du backend pour cette raison : c'est
-lui qui exécute le superviseur, et une installation qui l'ometterait
-empêcherait le service de démarrer.
+Guide pas-à-pas : [docs/DEPLOIEMENT-RENDER.md](docs/DEPLOIEMENT-RENDER.md).
 
-### La variable qui casse le chrono en silence
-
-Si l'interface est sur Vercel, `WS_ALLOWED_ORIGINS` **doit** contenir l'origine
-Vercel côté Render. Sinon le navigateur annonce une origine non autorisée, la
-connexion est refusée en code 1008, et le jury voit un chrono qui ne descend pas
-sans le moindre message d'erreur.
+### Ce qui reste à faire
 
 ```bash
-npm run render:check    # affiche la valeur attendue et l'état du blueprint
+npm run render:check    # lit le blueprint et affiche la valeur attendue
 ```
 
-Il vérifie aussi que `buildCommand` ne compile pas le frontend **et** que le
-service ne prétend pas le servir : les deux erreurs sont aussi muettes l'une que
-l'autre.
+Le service est un `web` sur le runtime Node, avec un build qui compile les trois
+interfaces puis démarre le superviseur depuis `backend/`.
 
-### Le backend, en une commande
+### Le canal temps réel
 
-```bash
-npm run vercel:backend -- https://aeerks.onrender.com   # remplit vercel.json
-npm run vercel:assemble                                 # vérifie dist/ avant déploiement
-```
+`WS_ALLOWED_ORIGINS` est écrite dans le blueprint (`value: ""`), donc rien à
+saisir. Seule `DATABASE_URL` reste à définir dans le dashboard.
 
-`vercel.json` est la **source unique** : le relais `/api`, la directive
-`connect-src` de la CSP et le `VITE_WS_URL` injecté au build en découlent. Une
-saisie, et le build échoue bruyamment si elle est absente ou incohérente.
+### Le chemin Vercel reste disponible
+
+`vercel.json`, `scripts/assemble-vercel-dist.mjs` et la CI qui vérifie cet
+assemblage sont conservés : revenir à un CDN devant demande trois changements
+explicites, tous signalés par `npm run render:check`. Voir
+[docs/DEPLOIEMENT-VERCEL.md](docs/DEPLOIEMENT-VERCEL.md) et
+[docs/adr/ADR-0006-topologie-deploiement.md](docs/adr/ADR-0006-topologie-deploiement.md).
 
 ## Base de données
 

@@ -35,87 +35,119 @@ export function compileLeFrontend(buildCommand) {
 /**
  * Le service sert-il les interfaces, et est-ce cohérent avec son build ?
  *
- * Répond à la seule question qui compte pour Render : ce processus sert-il des
- * fichiers d'écran, oui ou non ? La réponse doit découler de la configuration
- * (`STATIC_SERVE_APPS`), jamais d'un artefact de build laissé sur le disque.
+ * Répond à la seule question qui décide de la topologie : ce processus sert-il
+ * des fichiers d'écran, oui ou non ?
+ *
+ * La réponse se déduit de `buildCommand` — le build produit ce que le service
+ * sert — et non de `STATIC_SERVE_APPS`, qui ne figure plus dans le blueprint.
+ * C'est le bon sens de lecture : une variable qui contredirait le build
+ * décrirait une configuration impossible, alors que le build est ce qui
+ * décide réellement.
+ *
+ * `STATIC_SERVE_APPS` reste honorée par `static.ts` comme dérogation
+ * d'urgence, mais elle ne vit plus dans le blueprint : déduire le rôle des
+ * fichiers présents est le comportement correct, et la figer ajouterait une
+ * variable à maintenir sans rien apporter.
  */
 export function auditRoleService({ buildCommand, serveApps }) {
-  if (serveApps === 'false') {
-    return compileLeFrontend(buildCommand)
-      ? {
-          level: WARN,
-          text:
-            "buildCommand compile encore le frontend alors que le service ne le sert " +
-            "pas (STATIC_SERVE_APPS=false). Attendu : `npm ci` seul — les écrans sont " +
-            "sur le CDN. Une minute et ~200 Mo par déploiement pour rien.",
-        }
-      : { level: OK, text: "Service en relais seul (/api, /ws, sonde), sans build frontend — cohérent." };
+  const compile = compileLeFrontend(buildCommand);
+
+  if (serveApps === 'false' && compile) {
+    return {
+      level: WARN,
+      text:
+        'buildCommand compile les interfaces mais STATIC_SERVE_APPS=false les fait ' +
+        'ignorer : les écrans seraient produits puis jamais servis, et chaque ' +
+        'route répondrait 404. Retirez la variable, ou retirez le build.',
+    };
   }
 
-  if (serveApps === 'true') {
-    return compileLeFrontend(buildCommand)
-      ? { level: OK, text: 'Service : interfaces + relais, et le build les produit — cohérent.' }
-      : {
-          level: KO,
-          text:
-            'INCOHÉRENT : STATIC_SERVE_APPS=true exige les trois interfaces, mais ' +
-            'buildCommand n’en compile aucune. Le processus refusera de démarrer ' +
-            '(build partiel détecté au boot).',
-        };
+  if (compile) {
+    return {
+      level: OK,
+      text:
+        'Mono-origine : ce service sert les trois écrans ET relaie /api et /ws. ' +
+        'Le canal temps réel suit l\'origine de la page — aucune variable à saisir.',
+    };
   }
 
   return {
     level: WARN,
     text:
-      'STATIC_SERVE_APPS absent : le mode sera DÉDUIT de la présence de apps/*/dist. ' +
-      'Fonctionnel, mais l’intention reste implicite — un dist/ résiduel (build ' +
-      'manuel, cache) ferait servir un écran par ce service alors qu’il est sur le CDN.',
+      "Le service ne compile aucune interface : il n'expose donc que /api, /ws " +
+      'et la sonde.\n' +
+      "  C'est le montage « CDN devant » (docs/DEPLOIEMENT-VERCEL.md). Possible, " +
+      "mais alors WS_ALLOWED_ORIGINS doit porter l'origine du CDN, sans quoi le " +
+      'canal est refusé en 1008.',
   };
 }
 
 /**
  * `WS_ALLOWED_ORIGINS` décide si le WebSocket du jury sera accepté.
  *
- * C'est le piège du déploiement à deux origines : le navigateur envoie alors
- * l'origine Vercel, absente de la liste, et la connexion est refusée en code
- * 1008. Le jury voit un chrono qui ne descend pas, sans le moindre message.
+ * Sa valeur correcte dépend de la topologie, et c'est ce qui rend l'audit
+ * intéressant :
+ *
+ *   MONO-ORIGINE (le service sert les écrans) — VIDE est juste. Le navigateur
+ *   annonce l'origine de Render, qui est la seule autorisée, donc la connexion
+ *   passe. Aucune saisie à faire.
+ *
+ *   CDN DEVANT (l'interface est ailleurs) — VIDE est FAUX, et le pire des cas.
+ *   Le navigateur annonce l'origine du CDN, absente de la liste : refus en
+ *   code 1008, le chrono du jury reste figé, sans le moindre message. Aucun
+ *   test, aucune console, aucun code HTTP ne le signale.
+ *
+ * Ce contrôle est donc paramétré par `monoOrigine`, déduit du build. Sans ce
+ * paramètre, l'audit cracherait un avertissement sur une configuration
+ * parfaitement correcte — et l'on s'habitue à ignorer les avertissements.
  *
  * Chaque cas rend UN constat, pas deux : le tri par gravité réorganise la
  * liste, et un avertissement détaché de son sujet s'affiche avant la ligne qui
  * dit de quoi il parle.
  */
-export function auditOriginsWs(envVars) {
+export function auditOriginsWs(envVars, { monoOrigine }) {
   const ws = (envVars ?? []).find((e) => e.key === 'WS_ALLOWED_ORIGINS');
 
   if (!ws) {
     return {
-      level: KO,
+      level: 'warn',
       text:
-        'WS_ALLOWED_ORIGINS : ABSENT de envVars. Rien ne décidera de l’origine ' +
-        'autorisée et le WebSocket sera refusé par défaut.',
+        'WS_ALLOWED_ORIGINS : absent de envVars.\n' +
+        '  Le serveur de diffusion retombe alors sur sa valeur par défaut ' +
+        '(même origine), ce qui est correct ici — mais autant que la décision ' +
+        'soit écrite dans le dépôt plutôt que laissée à un défaut.',
     };
   }
 
   if (ws.sync === false) {
     return {
-      level: WARN,
+      level: 'warn',
       text:
         'WS_ALLOWED_ORIGINS : à définir dans le dashboard Render.\n' +
-        "  Valeur attendue : l'origine Vercel, ex. https://aeerks.vercel.app\n" +
-        '  VIDE = même origine uniquement. Sur un déploiement à deux origines,\n' +
-        "  une valeur vide REFUSE le WebSocket de l'interface Vercel (code 1008),\n" +
-        '  et le chrono du jury reste figé sans message d’erreur.',
+        (monoOrigine
+          ? '  Le service sert les écrans : une valeur VIDE suffit — même origine.\n'
+          : "  ATTENTION : l'interface est sur un CDN. Mettez l'origine du CDN,\n" +
+            "  sans barre oblique finale, ex. https://aeerks.vercel.app\n") +
+        '  Une valeur fausse ne produit AUCUNE erreur visible : refus en 1008,\n' +
+        '  et le chrono du jury reste figé sans message.',
     };
   }
 
   if (ws.value === '') {
-    return {
-      level: WARN,
-      text:
-        'WS_ALLOWED_ORIGINS : vide (même origine uniquement).\n' +
-        "  ATTENTION si l'interface est sur Vercel : l'origine Vercel ne sera pas\n" +
-        '  autorisée et la connexion sera refusée en code 1008.',
-    };
+    return monoOrigine
+      ? {
+          level: OK,
+          text:
+            'WS_ALLOWED_ORIGINS : vide — correct en mono-origine, l\'origine de la ' +
+            'page est la seule autorisée.',
+        }
+      : {
+          level: 'warn',
+          text:
+            'WS_ALLOWED_ORIGINS : vide alors que l\'interface est sur un CDN.\n' +
+            "  Le navigateur annonce l'origine du CDN, qui n'est pas autorisée : " +
+            'refus en 1008, chrono figé sans message. Renseignez-la.',
+        };
   }
 
   return { level: OK, text: `WS_ALLOWED_ORIGINS : ${ws.value}` };
@@ -147,17 +179,20 @@ export function auditBlueprint(doc) {
     findings.push({ level: INFO, text: `${champ.padEnd(12)}: ${service[champ] ?? '(absent)'}` });
   }
 
-  // `rootDir` est ce qui restreint le service au backend. Son absence est
-  // légitime (service à la racine), mais elle change ce qu'il installe et sert :
-  // à afficher, jamais à supposer.
+  // `rootDir` restreindrait le service à un sous-dossier. Le déploiement
+  // retenu en mono-origine n'en a pas besoin — le service doit compiler les
+  // interfaces, qui vivent à la racine — mais le champ reste affiché : s'il
+  // réapparaît, il change ce que le service installe ET ce qu'il sert, et
+  // c'est le genre de champ qu'on ne remarque pas.
   findings.push({ level: INFO, text: `rootDir      : ${service.rootDir ?? '(racine du dépôt)'}` });
 
-  if (service.rootDir && service.rootDir !== 'backend') {
+  if (service.rootDir) {
     findings.push({
       level: WARN,
       text:
-        `rootDir = "${service.rootDir}" : le superviseur partira de ce dossier, ` +
-        'pas de backend/.',
+        `rootDir = "${service.rootDir}" : le service se restreint à ce dossier. ` +
+        'Les interfaces étant à la racine, il ne peut plus les compiler — et ' +
+        'plus les servir non plus. À retirer pour un déploiement mono-origine.',
     });
   }
 
@@ -175,14 +210,20 @@ export function auditBlueprint(doc) {
       : { level: KO, text: 'startCommand ABSENT : Render ne saura pas quoi lancer.' }
   );
 
-  findings.push({
-    ...auditRoleService({
-      buildCommand: service.buildCommand,
-      serveApps: service.envVars?.find((e) => e.key === 'STATIC_SERVE_APPS')?.value,
-    }),
-  });
+  // Le rôle du service décide de la valeur CORRECTE de WS_ALLOWED_ORIGINS, donc
+  // il est calculé une fois et partagé : l'audit des origines ne doit pas
+  // redécouvrir la topologie par lui-même, sous peine de diverger d'un build.
+  const buildCommand = service.buildCommand;
+  const monoOrigine = compileLeFrontend(buildCommand);
 
-  findings.push(auditOriginsWs(service.envVars));
+  findings.push(
+    auditRoleService({
+      buildCommand,
+      serveApps: service.envVars?.find((e) => e.key === 'STATIC_SERVE_APPS')?.value,
+    })
+  );
+
+  findings.push(auditOriginsWs(service.envVars, { monoOrigine }));
 
   return { service, findings };
 }
