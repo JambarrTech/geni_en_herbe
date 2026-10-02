@@ -1,4 +1,4 @@
-﻿# AEERKS — blueprint Render
+# AEERKS — blueprint Render
 #
 # UN SEUL SERVICE, ET C'EST DÉLIBÉRÉ
 # ===================================
@@ -16,7 +16,7 @@
 #
 # UNE SEULE ORIGINE, ET C'EST DÉLIBÉRÉ
 # ======================================
-# Tout est servi depuis `aeerks.onrender.com` : les trois interfaces par le
+# Tout est servi depuis `aeerks-n8pe.onrender.com` : les trois interfaces par le
 # processus `static`, qui relaie `/api` et `/ws` vers `api` et `ws`.
 #
 # Un CDN devant (Vercel) a été envisagé puis écarté. Le trafic vivant — WebSocket

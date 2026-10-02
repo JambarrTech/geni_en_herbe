@@ -140,8 +140,8 @@ export function resolveBackendOrigin(json, options = {}) {
         `    - la destination du relais /api\n` +
         `    - la directive connect-src de la CSP (WebSocket)\n` +
         `  Puis commite le fichier : VITE_WS_URL en découle automatiquement.\n` +
-        `  Exemple : https://aeerks.onrender.com\n` +
-        `  (npm run vercel:backend -- https://aeerks.onrender.com le fait à ta place)`
+        `  Exemple : https://aeerks-n8pe.onrender.com\n` +
+        `  (npm run vercel:backend -- https://aeerks-n8pe.onrender.com le fait à ta place)`
     );
   }
 

@@ -143,11 +143,11 @@ le code mort échoue à la compilation plutôt que de s'accumuler.
 **Tout sur Render, une seule origine.** Une seule variable à saisir.
 
 ```
-https://aeerks.onrender.com/          → écran public
-https://aeerks.onrender.com/jury      → écran jury
-https://aeerks.onrender.com/admin     → administration
-https://aeerks.onrender.com/api/...   → API REST
-wss://aeerks.onrender.com/ws          → diffusion temps réel
+https://aeerks-n8pe.onrender.com/          → écran public
+https://aeerks-n8pe.onrender.com/jury      → écran jury
+https://aeerks-n8pe.onrender.com/admin     → administration
+https://aeerks-n8pe.onrender.com/api/...   → API REST
+wss://aeerks-n8pe.onrender.com/ws          → diffusion temps réel
 ```
 
 Pas de CDN devant, pas de CORS, pas d'origine à autoriser.

@@ -92,7 +92,7 @@ tout seuls s'ils manquent :
 Une commande, deux emplacements :
 
 ```bash
-npm run vercel:backend -- https://aeerks.onrender.com
+npm run vercel:backend -- https://aeerks-n8pe.onrender.com
 ```
 
 Elle remplace les deux `REMPLACER_PAR_TON_API` de `vercel.json` — la destination
@@ -102,10 +102,10 @@ affiche les étapes qui restent sur les autres plateformes.
 
 ```diff
 - { "source": "/api/:path*", "destination": "https://REMPLACER_PAR_TON_API/api/:path*" },
-+ { "source": "/api/:path*", "destination": "https://aeerks.onrender.com/api/:path*" },
++ { "source": "/api/:path*", "destination": "https://aeerks-n8pe.onrender.com/api/:path*" },
 
 - connect-src 'self' wss://REMPLACER_PAR_TON_API;
-+ connect-src 'self' wss://aeerks.onrender.com;
++ connect-src 'self' wss://aeerks-n8pe.onrender.com;
 ```
 
 **Il n'y a rien d'autre à saisir.** `VITE_WS_URL` est déduit de `vercel.json`

@@ -4,11 +4,11 @@ Le backend, les trois interfaces et le temps réel sur **un seul service**, une
 seule origine, un seul domaine.
 
 ```
-https://aeerks.onrender.com/         → écran public
-https://aeerks.onrender.com/jury     → écran jury
-https://aeerks.onrender.com/admin    → administration
-https://aeerks.onrender.com/api/...  → API REST
-wss://aeerks.onrender.com/ws         → diffusion temps réel
+https://aeerks-n8pe.onrender.com/         → écran public
+https://aeerks-n8pe.onrender.com/jury     → écran jury
+https://aeerks-n8pe.onrender.com/admin    → administration
+https://aeerks-n8pe.onrender.com/api/...  → API REST
+wss://aeerks-n8pe.onrender.com/ws         → diffusion temps réel
 ```
 
 Aucune configuration de domaine supplémentaire, aucun CORS, aucun WebSocket
@@ -201,13 +201,13 @@ Deux origines si l'écran public et le jury sont sur des domaines différents �
 la liste est séparée par des virgules :
 
 ```
-WS_ALLOWED_ORIGINS=https://aeerks.onrender.com,https://jury.aeerks.sn
+WS_ALLOWED_ORIGINS=https://aeerks-n8pe.onrender.com,https://jury.aeerks.sn
 ```
 
 Pour vérifier que le canal fonctionne réellement :
 
 ```bash
-npx tsx backend/scripts/ws-smoke.mjs wss://aeerks.onrender.com/ws
+npx tsx backend/scripts/ws-smoke.mjs wss://aeerks-n8pe.onrender.com/ws
 ```
 
 ## La disposition des ports : un seul point d'entrée
@@ -233,10 +233,10 @@ n'ajouterait qu'une surface d'attaque.
 ## Vérifier
 
 ```bash
-curl -I https://aeerks.onrender.com/          # 200
-curl -I https://aeerks.onrender.com/jury     # 200
-curl -I https://aeerks.onrender.com/admin    # 200
-curl -s https://aeerks.onrender.com/api/health
+curl -I https://aeerks-n8pe.onrender.com/          # 200
+curl -I https://aeerks-n8pe.onrender.com/jury     # 200
+curl -I https://aeerks-n8pe.onrender.com/admin    # 200
+curl -s https://aeerks-n8pe.onrender.com/api/health
 ```
 
 Puis, dans le navigateur : `/jury`, connexion, lancement d'un match, et
@@ -246,7 +246,7 @@ qui valide la boucle de chrono.
 Pour le canal temps réel, sans navigateur :
 
 ```bash
-cd backend && npx tsx scripts/ws-smoke.mjs wss://aeerks.onrender.com/ws
+cd backend && npx tsx scripts/ws-smoke.mjs wss://aeerks-n8pe.onrender.com/ws
 ```
 
 Un chronomètre figé, ou `aeerks_leader 0` sur `/metrics` du worker, indique que

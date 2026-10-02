@@ -151,8 +151,8 @@ test('parseVercelConfig — substitution ratée : hôte illisible', () => {
   // vert avec un canal temps reel mort. L'echec doit etre explicite.
   const brut = CORRECT
     .split('https://api.aeerks.sn')
-    .join('https://https://aeerks.onrender.com')
-    .replace('wss://api.aeerks.sn', 'wss://https://aeerks.onrender.com');
+    .join('https://https://aeerks-n8pe.onrender.com')
+    .replace('wss://api.aeerks.sn', 'wss://https://aeerks-n8pe.onrender.com');
   const r = parseVercelConfig(brut);
   assert.equal(r.occurrences, 0);
   assert.equal(r.relayHost, null, 'un hote contenant un schema doit etre rejete');

@@ -10,15 +10,15 @@
  * se voyait déconnecté sans explication ; si le marqueur restait, le build
  * échouait avec un message à déchiffrer.
  *
- * `npm run vercel:backend -- https://aeerks.onrender.com` remplace les deux
+ * `npm run vercel:backend -- https://aeerks-n8pe.onrender.com` remplace les deux
  * occurrences d'un coup, puis affiche ce qu'il reste à faire ailleurs — parce
  * qu'il reste forcément une chose à faire ailleurs : `WS_ALLOWED_ORIGINS` sur
  * Render doit contenir l'origine Vercel, et elle n'est connue qu'après la
  * création du projet.
  *
  * Usage :
- *   npm run vercel:backend -- https://aeerks.onrender.com
- *   npm run vercel:backend -- https://aeerks.onrender.com/   (barre finale tolérée)
+ *   npm run vercel:backend -- https://aeerks-n8pe.onrender.com
+ *   npm run vercel:backend -- https://aeerks-n8pe.onrender.com/   (barre finale tolérée)
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -30,7 +30,7 @@ const argv = process.argv.slice(2).filter((a) => a !== '--');
 if (argv.length !== 1) {
   console.error(
     `Usage : npm run vercel:backend -- <origine>\n` +
-      `  Exemple : npm run vercel:backend -- https://aeerks.onrender.com`
+      `  Exemple : npm run vercel:backend -- https://aeerks-n8pe.onrender.com`
   );
   process.exit(1);
 }
@@ -70,7 +70,7 @@ if (occurrences === 0) {
 // Le marqueur est *suffixé* d'un schéma déjà écrit dans le fichier : le relais
 // porte `https://REMPLACER_PAR_TON_API` et la CSP `wss://REMPLACER_PAR_TON_API`.
 // Remplacer le marqueur par l'origine entière produirait
-// `https://https://aeerks.onrender.com` — un relais qui, relu par la regex,
+// `https://https://aeerks-n8pe.onrender.com` — un relais qui, relu par la regex,
 // donne un hôte « https: », lequel compare EGAL à l'autre « https: ». Le
 // contrôle de cohérence passe alors, VITE_WS_URL devient `wss://https:`, et le
 // déploiement est produit entièrement vert avec un canal temps réel mort.
