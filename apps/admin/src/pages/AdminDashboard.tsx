@@ -146,6 +146,16 @@ export const AdminDashboard: React.FC = () => {
   const [confirmUnpublish, setConfirmUnpublish] = useState(false);
 
   /**
+   * Match visé par une suppression, et non un simple booléen.
+   *
+   * Il faut l'objet entier, pas son identifiant : le dialogue doit nommer la
+   * cible (« Match n° 3, Alpha contre Bravo ») pour que la décision soit
+   * éclairée. Un « Supprimer ? » sans nom ne permet pas de vérifier qu'on a
+   * choisi le bon match — c'est toute la raison d'être d'une confirmation.
+   */
+  const [matchToDelete, setMatchToDelete] = useState<MatchItem | null>(null);
+
+  /**
    * Matchs non clôturés, pour l'aperçu du dialogue de publication.
    *
    * Le serveur refuse (409) de publier tant qu'un match n'est pas terminé.
@@ -357,6 +367,45 @@ export const AdminDashboard: React.FC = () => {
       void refreshLiveState();
     } catch (err) {
       showToast(errorMessage(err, 'Erreur programmation du match'), 'error');
+    }
+  };
+
+  /**
+   * Le serveur refuse-t-il déjà cette suppression ?
+   *
+   * Deux refus existent, et ils ne se détectent pas de la même façon :
+   *
+   *  - un match LIVE ou PAUSED est refusé (400) — état visible ici, donc le
+   *    bouton est désactivé et l'administrateur n'a pas à apprendre l'échec en
+   *    le constatant ;
+   *  - un match ayant un historique de score est refusé (409), parce que
+   *    `score_events` est en ON DELETE CASCADE : supprimer effacerait le
+   *    journal d'audit, ce qu'une compétition auditée ne peut pas accepter.
+   *    Cela n'est PAS détectable ici — seule la réponse du serveur le révèle,
+   *    d'où le message d'erreur remonté tel quel.
+   *
+   * Un bouton désactivé sans explication serait lu comme un bug : le `title`
+   * et le `aria-label` portent donc la raison du refus.
+   */
+  const suppressionBloquee = (status: MatchItem['status']) =>
+    status === 'LIVE' || status === 'PAUSED';
+
+  const confirmDeleteMatch = async () => {
+    const cible = matchToDelete;
+    if (!cible) return;
+    // On referme avant d'envoyer, comme `confirmPublishResults` : le dialogue
+    // n'a plus rien à afficher pendant l'aller-retour, et le garder ouvert
+    // exposerait à la fermeture par Échap en cours de requête.
+    setMatchToDelete(null);
+    try {
+      await api.delete(`/api/matches/${cible.id}`);
+      showToast(`Match n° ${cible.matchNumber} supprimé`);
+      // Le classement et l'écran public changent avec le match : on recharge
+      // les deux, sinon la carte disparue revient au prochain rafraîchissement.
+      void fetchData();
+      void refreshLiveState();
+    } catch (err) {
+      showToast(errorMessage(err, 'Suppression impossible'), 'error');
     }
   };
 
@@ -915,16 +964,38 @@ export const AdminDashboard: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
-                    <span className="text-[11px] text-slate-500">
+                  <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-slate-500 truncate">
                       Jury : {m.juryName || 'Non assigné'}
                     </span>
-                    <a
-                      href="/jury"
-                      className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold"
-                    >
-                      Arbitrer
-                    </a>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {/* Suppression.
+                          Icône seule, comme les autres actions iconiques de
+                          l'application ; le nom accessible porte le numéro, sinon
+                          un lecteur d'écran annoncerait « bouton » sans dire
+                          lequel des six matchs de la grille. */}
+                      <button
+                        type="button"
+                        id={`btn-delete-match-${m.id}`}
+                        onClick={() => setMatchToDelete(m)}
+                        disabled={suppressionBloquee(m.status)}
+                        aria-label={`Supprimer le match n° ${m.matchNumber}`}
+                        title={
+                          suppressionBloquee(m.status)
+                            ? `Impossible de supprimer un match ${m.status === 'LIVE' ? 'en cours' : 'en pause'} : terminez-le d'abord.`
+                            : `Supprimer le match n° ${m.matchNumber}`
+                        }
+                        className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-rose-600 hover:bg-rose-50 hover:border-rose-200 transition-colors disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:text-slate-500 disabled:hover:bg-transparent disabled:hover:border-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-1"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                      <a
+                        href="/jury"
+                        className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold"
+                      >
+                        Arbitrer
+                      </a>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -1722,7 +1793,7 @@ export const AdminDashboard: React.FC = () => {
 
       {/* Publication des résultats.
           Le nombre de matchs et l'indicateur d'état sont rappeles dans le
-          dialogue : c'est ce qui permet de refuser une publication launched trop
+          dialogue : c'est ce qui permet de refuser une publication lancée trop
           tôt, au lieu de la découvrir refusée par le serveur (409). */}
       <ConfirmDialog
         open={confirmPublish}
@@ -1761,6 +1832,39 @@ export const AdminDashboard: React.FC = () => {
         onConfirm={() => void confirmUnpublishResults()}
         onCancel={() => setConfirmUnpublish(false)}
       />
+
+      {/* Suppression d'un match.
+          `tone="danger"` : l'acte est irréversible, contrairement au retrait des
+          résultats. Le dialogue nomme la cible et rappelle ce qui disparaît —
+          un match programmé par erreur est un rattrapage, mais un match effacé
+          ne se restitue pas. */}
+      <ConfirmDialog
+        open={matchToDelete !== null}
+        title={`Supprimer le match n° ${matchToDelete?.matchNumber ?? ''} ?`}
+        message="Le match et ses questions seront effacés. Cette suppression est définitive : il n'y a pas de moyen de les récupérer."
+        confirmLabel="Supprimer définitivement"
+        tone="danger"
+        onConfirm={() => void confirmDeleteMatch()}
+        onCancel={() => setMatchToDelete(null)}
+      >
+        {matchToDelete && (
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5">
+            <div className="text-[13px] font-semibold text-slate-900">
+              {matchToDelete.teamA?.name} contre {matchToDelete.teamB?.name}
+            </div>
+            <div className="mt-1 flex items-center justify-between text-[13px]">
+              <span className="font-semibold text-slate-700">Phase</span>
+              <span className="text-slate-900">{matchToDelete.phase}</span>
+            </div>
+            <div className="mt-1 flex items-center justify-between text-[13px]">
+              <span className="font-semibold text-slate-700">Score</span>
+              <span className="tabular-nums text-slate-900">
+                {matchToDelete.scoreA} – {matchToDelete.scoreB}
+              </span>
+            </div>
+          </div>
+        )}
+      </ConfirmDialog>
       </div>
     </div>
   );

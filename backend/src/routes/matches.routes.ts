@@ -1049,6 +1049,15 @@ matchesRouter.delete('/:id', requireAuth, requireAdmin, adminWriteLimit, async (
 
     await db.delete(matches).where(eq(matches.id, id));
     await logAudit(req.user?.uid, req.user?.email, 'DELETE_MATCH', 'match', String(id));
+
+    // L'écran public et l'écran jury affichent ce match. Sans diffusion, le
+    // fantôme y resterait jusqu'à la prochaine resynchronisation — c'est-à-dire
+    // jusqu'au rechargement de la page, en pleine session, sur un écran projeté
+    // que personne ne recharge. On repart donc de l'état serveur, comme pour
+    // `match_finished`.
+    const liveState = await getLiveState(target.eventId, true);
+    broadcast('match_deleted', { matchId: id, liveState });
+
     res.json({ success: true });
   } catch (error: any) {
     log.error('DELETE match error', { err: error });

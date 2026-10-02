@@ -3,6 +3,7 @@ import { render, waitFor, fireEvent } from '@testing-library/react';
 import { axe } from 'vitest-axe';
 
 import { api } from '@shared/lib/api.ts';
+import type { MatchItem } from '@shared/types.ts';
 import { AdminDashboard } from '@apps/admin/src/pages/AdminDashboard.tsx';
 
 // ---------------------------------------------------------------------------
@@ -55,12 +56,18 @@ const ROUTES: Record<string, unknown> = {
   '/api/users': [],
 };
 
-function stubGet() {
+/**
+ * Branche les huit chemins sur `routes`.
+ *
+ * Le paramètre permet à un test de n'injecter que la liste qui l'intéresse :
+ * les tests de suppression ont besoin de matchs, les autres n'en veulent pas.
+ */
+function stubGet(routes: Record<string, unknown> = ROUTES) {
   return vi
     .spyOn(api, 'get')
     .mockImplementation((async (path: string) => {
-      if (!(path in ROUTES)) throw new Error(`GET inattendu dans ce test : ${path}`);
-      return ROUTES[path];
+      if (!(path in routes)) throw new Error(`GET inattendu dans ce test : ${path}`);
+      return routes[path];
     }) as unknown as typeof api.get);
 }
 
@@ -148,6 +155,143 @@ describe('AdminDashboard — publication des résultats', () => {
     // n'a pas de sens et ne doit pas être rendu.
     expect(document.getElementById('btn-publish-overview')).not.toBeNull();
     expect(document.getElementById('btn-unpublish-overview')).toBeNull();
+  });
+});
+
+/**
+ * Suppression d'un match.
+ *
+ * POURQUOI CES TESTS EXISTENT
+ * ----------------------------
+ * La route `DELETE /api/matches/:id` existait déjà, prudente et bien gardée
+ * (400 sur un match en cours, 409 si un historique de score s'y oppose). Mais
+ * rien ne la rendait accessible depuis l'interface : le comité pouvait
+ * programmer un match par erreur et n'avait aucun moyen de le corriger.
+ *
+ * Ce qui est vérifié ici n'est donc pas « un bouton existe », mais qu'il ne
+ * peut pas faire n'importe quoi, et qu'il prévient. Le serveur refuse deux
+ * cas, et l'interface doit les ANNONCER plutôt que de les faire découvrir à
+ * l'essai : un bouton qui échoue toujours se lit comme un bug.
+ */
+describe('AdminDashboard — suppression d’un match', () => {
+  /** Un match minimal, dans l'état demandé. */
+  const match = (id: number, status: MatchItem['status'], numero = id) => ({
+    id,
+    eventId: 1,
+    phase: 'Phase qualificative',
+    matchNumber: numero,
+    teamAId: 10 + id,
+    teamBId: 20 + id,
+    teamA: { id: 10 + id, name: `Alpha ${id}` },
+    teamB: { id: 20 + id, name: `Bravo ${id}` },
+    status,
+    currentQuestionIndex: 0,
+    scoreA: 0,
+    scoreB: 0,
+    timerSecondsLeft: 0,
+    timerIsRunning: false,
+    timerDuration: 0,
+  });
+
+  async function mountAvecMatches(matches: unknown[]) {
+    stubGet({ ...ROUTES, '/api/matches': matches });
+    const view = render(<AdminDashboard />);
+    await waitFor(() => expect(document.getElementById('btn-publish-overview')).not.toBeNull());
+
+    fireEvent.click(document.getElementById('tab-matches')!);
+    await waitFor(() => expect(document.getElementById('btn-add-match')).not.toBeNull());
+    return view;
+  }
+
+  /** Le bouton de confirmation du dialogue, pas celui qui l'ouvre. */
+  function boutonConfirmer(): HTMLElement {
+    const boutons = Array.from(document.querySelectorAll<HTMLElement>('dialog button'));
+    const danger = boutons.find((b) => b.textContent?.includes('Supprimer définitivement'));
+    if (!danger) throw new Error('le dialogue de suppression ne propose pas de confirmation');
+    return danger;
+  }
+
+  it('propose la suppression sur un match programmé', async () => {
+    await mountAvecMatches([match(1, 'SCHEDULED')]);
+
+    const bouton = document.getElementById('btn-delete-match-1') as HTMLButtonElement;
+    expect(bouton).not.toBeNull();
+    expect(bouton.disabled).toBe(false);
+  });
+
+  it('interdit l’action sur un match en cours ou en pause, et l’explique', async () => {
+    await mountAvecMatches([match(1, 'LIVE', 4), match(2, 'PAUSED', 5)]);
+
+    // Le serveur répond 400 dans ces deux cas. Désactiver le bouton évite au
+    // comité d'ouvrir une confirmation pour une opération vouée à l'échec —
+    // mais un bouton gris sans raison se lit comme un bug, donc le motif est
+    // dans le `title` ET dans le nom accessible.
+    for (const id of [1, 2]) {
+      const bouton = document.getElementById(`btn-delete-match-${id}`) as HTMLButtonElement;
+      expect(bouton.disabled).toBe(true);
+      expect(bouton.getAttribute('title')).toMatch(/terminez-le/);
+      expect(bouton.getAttribute('aria-label')).toContain('Supprimer le match n°');
+    }
+  });
+
+  it('nomme le match visé, pour que la décision soit éclairée', async () => {
+    await mountAvecMatches([match(7, 'SCHEDULED', 3)]);
+
+    fireEvent.click(document.getElementById('btn-delete-match-7')!);
+
+    // Sans le numéro et les équipes, « Supprimer ? » ne permet pas de vérifier
+    // qu'on a choisi le bon match — c'est toute la raison d'être de la
+    // confirmation.
+    await waitFor(() => expect(boutonConfirmer()).toBeTruthy());
+    const dialogue = document.querySelector('dialog[open]')!;
+    expect(dialogue.textContent).toContain('Supprimer le match n° 3');
+    expect(dialogue.textContent).toContain('Alpha 7');
+    expect(dialogue.textContent).toContain('Bravo 7');
+  });
+
+  it('supprime le match après confirmation', async () => {
+    const supprimer = vi.spyOn(api, 'delete').mockResolvedValue({ success: true } as never);
+    await mountAvecMatches([match(7, 'SCHEDULED', 3)]);
+
+    fireEvent.click(document.getElementById('btn-delete-match-7')!);
+    await waitFor(() => expect(boutonConfirmer()).toBeTruthy());
+    fireEvent.click(boutonConfirmer());
+
+    await waitFor(() => expect(supprimer).toHaveBeenCalledWith('/api/matches/7'));
+  });
+
+  it('n’envoie rien si la confirmation est annulée', async () => {
+    const supprimer = vi.spyOn(api, 'delete').mockResolvedValue({ success: true } as never);
+    await mountAvecMatches([match(7, 'SCHEDULED', 3)]);
+
+    fireEvent.click(document.getElementById('btn-delete-match-7')!);
+    await waitFor(() => expect(boutonConfirmer()).toBeTruthy());
+
+    const annuler = Array.from(document.querySelectorAll<HTMLElement>('dialog button')).find((b) =>
+      b.textContent?.includes('Annuler')
+    )!;
+    fireEvent.click(annuler);
+
+    expect(supprimer).not.toHaveBeenCalled();
+  });
+
+  it('remonte le refus du serveur au lieu d’un échec muet', async () => {
+    // 409 : le match a un historique de score. Cette information n'existe PAS
+    // côté client — seule la réponse du serveur la porte. Si elle n'atteint pas
+    // l'écran, l'administrateur voit un bouton faire semblant, puis rien.
+    vi.spyOn(api, 'delete').mockRejectedValue(
+      new Error('Impossible de supprimer : ce match possède un historique de score.')
+    );
+    await mountAvecMatches([match(7, 'FINISHED', 3)]);
+
+    fireEvent.click(document.getElementById('btn-delete-match-7')!);
+    await waitFor(() => expect(boutonConfirmer()).toBeTruthy());
+    fireEvent.click(boutonConfirmer());
+
+    await waitFor(() => {
+      const toast = document.getElementById('admin-toast-alert');
+      expect(toast?.textContent).toContain('historique de score');
+    });
   });
 });
 
