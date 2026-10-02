@@ -1055,8 +1055,15 @@ matchesRouter.delete('/:id', requireAuth, requireAdmin, adminWriteLimit, async (
     // jusqu'au rechargement de la page, en pleine session, sur un écran projeté
     // que personne ne recharge. On repart donc de l'état serveur, comme pour
     // `match_finished`.
-    const liveState = await getLiveState(target.eventId, true);
-    broadcast('match_deleted', { matchId: id, liveState });
+    //
+    // Isolé du `try` pour la même raison que sur les équipes : le match est
+    // DÉJÀ supprimé ici, donc une erreur de diffusion ne doit pas se déguiser
+    // en échec de suppression.
+    try {
+      broadcast('match_deleted', { matchId: id, liveState: await getLiveState(target.eventId, true) });
+    } catch (erreurDiffusion) {
+      log.error('Diffusion match_deleted impossible', { err: erreurDiffusion });
+    }
 
     res.json({ success: true });
   } catch (error: any) {

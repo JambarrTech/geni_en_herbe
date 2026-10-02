@@ -169,6 +169,7 @@ export const LiveProvider: React.FC<LiveProviderProps> = ({ children, sendToken 
             message.type === 'match_resumed' ||
             message.type === 'match_finished' ||
             message.type === 'match_deleted' ||
+            message.type === 'team_deleted' ||
             message.type === 'results_published' ||
             message.type === 'results_unpublished'
           ) {

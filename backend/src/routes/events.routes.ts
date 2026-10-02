@@ -205,6 +205,11 @@ eventsRouter.post('/:id/unpublish-results', requireAuth, requireAdmin, adminWrit
 eventsRouter.delete('/:id', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
+    // Même raison que pour les autres ressources : `DELETE` sur un identifiant
+    // inconnu renvoyait `success`.
+    const [cible] = await db.select({ id: events.id }).from(events).where(eq(events.id, id));
+    if (!cible) return res.status(404).json({ error: 'Événement introuvable' });
+
     await db.delete(events).where(eq(events.id, id));
     await logAudit(req.user?.uid, req.user?.email, 'DELETE_EVENT', 'event', String(id));
     res.json({ success: true });

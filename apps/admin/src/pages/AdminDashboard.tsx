@@ -4,6 +4,8 @@ import { APP_CONFIG } from '@shared/lib/config.ts';
 import { api, errorMessage, isAbort } from '@shared/lib/api.ts';
 import { Modal } from '@shared/components/Modal.tsx';
 import { ConfirmDialog } from '@shared/components/ui.tsx';
+import { BoutonSuppression } from '@shared/components/BoutonSuppression.tsx';
+import { useSuppression } from '@shared/lib/suppression.ts';
 import type {
   EventItem,
   ParticipantItem,
@@ -144,16 +146,6 @@ export const AdminDashboard: React.FC = () => {
   // pour un acte qui engage la compétition entière.
   const [confirmPublish, setConfirmPublish] = useState(false);
   const [confirmUnpublish, setConfirmUnpublish] = useState(false);
-
-  /**
-   * Match visé par une suppression, et non un simple booléen.
-   *
-   * Il faut l'objet entier, pas son identifiant : le dialogue doit nommer la
-   * cible (« Match n° 3, Alpha contre Bravo ») pour que la décision soit
-   * éclairée. Un « Supprimer ? » sans nom ne permet pas de vérifier qu'on a
-   * choisi le bon match — c'est toute la raison d'être d'une confirmation.
-   */
-  const [matchToDelete, setMatchToDelete] = useState<MatchItem | null>(null);
 
   /**
    * Matchs non clôturés, pour l'aperçu du dialogue de publication.
@@ -390,23 +382,123 @@ export const AdminDashboard: React.FC = () => {
   const suppressionBloquee = (status: MatchItem['status']) =>
     status === 'LIVE' || status === 'PAUSED';
 
-  const confirmDeleteMatch = async () => {
-    const cible = matchToDelete;
-    if (!cible) return;
-    // On referme avant d'envoyer, comme `confirmPublishResults` : le dialogue
-    // n'a plus rien à afficher pendant l'aller-retour, et le garder ouvert
-    // exposerait à la fermeture par Échap en cours de requête.
-    setMatchToDelete(null);
-    try {
-      await api.delete(`/api/matches/${cible.id}`);
-      showToast(`Match n° ${cible.matchNumber} supprimé`);
-      // Le classement et l'écran public changent avec le match : on recharge
-      // les deux, sinon la carte disparue revient au prochain rafraîchissement.
+  /**
+   * Suppression d'un match, d'une équipe, d'une question ou d'un membre.
+   *
+   * Un seul état et un seul dialogue pour les quatre : voir
+   * `shared/lib/suppression.ts`. `suppressionCible` remplace le booléen
+   * `matchToDelete` qu'il faudrait dupliquer quatre fois, et il porte
+   * l'identifiant des lignes à rafraîchir après coup.
+   */
+  const suppression = useSuppression({
+    onSucces: (texte) => {
+      showToast(texte);
+      // Le classement et l'écran public changent avec ce qu'on vient d'effacer :
+      // sans rechargement, la ligne disparue revient au prochain rafraîchissement.
       void fetchData();
       void refreshLiveState();
-    } catch (err) {
-      showToast(errorMessage(err, 'Suppression impossible'), 'error');
-    }
+    },
+    onEchec: (texte) => showToast(texte, 'error'),
+  });
+
+  const demanderSuppressionMatch = (m: MatchItem) => {
+    suppression.demander({
+      ressource: `/api/matches/${m.id}`,
+      titre: `Supprimer le match n° ${m.matchNumber} ?`,
+      message:
+        'Le match et ses questions seront effacés. Cette suppression est définitive : elle ne peut pas être annulée.',
+      succes: `Match n° ${m.matchNumber} supprimé`,
+      details: (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5">
+          <div className="text-[13px] font-semibold text-slate-900">
+            {m.teamA?.name} contre {m.teamB?.name}
+          </div>
+          <div className="mt-1 flex items-center justify-between text-[13px]">
+            <span className="font-semibold text-slate-700">Phase</span>
+            <span className="text-slate-900">{m.phase}</span>
+          </div>
+          <div className="mt-1 flex items-center justify-between text-[13px]">
+            <span className="font-semibold text-slate-700">Score</span>
+            <span className="tabular-nums text-slate-900">
+              {m.scoreA} – {m.scoreB}
+            </span>
+          </div>
+        </div>
+      ),
+    });
+  };
+
+  const demanderSuppressionEquipe = (t: TeamItem) => {
+    suppression.demander({
+      ressource: `/api/teams/${t.id}`,
+      titre: `Supprimer l'équipe ${t.name} ?`,
+      message:
+        "L'équipe sera effacée de la competition. Cette suppression est définitive : elle ne peut pas être annulée.",
+      succes: `Équipe ${t.name} supprimée`,
+      details: (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-[13px]">
+          <div className="font-semibold text-slate-900">{t.name}</div>
+          <div className="mt-1 flex items-center justify-between">
+            <span className="font-semibold text-slate-700">Code</span>
+            <span className="text-slate-900">{t.code}</span>
+          </div>
+          <div className="mt-1 flex items-center justify-between">
+            <span className="font-semibold text-slate-700">Membres</span>
+            <span className="tabular-nums text-slate-900">{t.members?.length ?? 0}</span>
+          </div>
+        </div>
+      ),
+    });
+  };
+
+  const demanderSuppressionQuestion = (q: QuestionItem) => {
+    suppression.demander({
+      ressource: `/api/questions/${q.id}`,
+      titre: 'Supprimer cette question ?',
+      message:
+        "L'énoncé et sa réponse officielle seront effacés. Cette suppression est définitive : elle ne peut pas être annulée.",
+      succes: 'Question supprimée',
+      details: (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5">
+          <p className="text-[13px] font-semibold text-slate-900">{q.text}</p>
+          <p className="mt-1.5 text-[13px] text-slate-700">
+            <span className="font-semibold">Réponse officielle : </span>
+            {q.answer}
+          </p>
+          <div className="mt-1.5 flex items-center gap-2 text-[11px]">
+            <span className="px-2 py-0.5 rounded-md bg-blue-50 text-[#0B3B82] font-bold">
+              {q.categoryName}
+            </span>
+            <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-semibold">
+              {q.difficulty}
+            </span>
+            <span className="text-amber-700 font-semibold">
+              {q.points} points • {q.timeLimitSeconds}s
+            </span>
+          </div>
+        </div>
+      ),
+    });
+  };
+
+  const demanderSuppressionParticipant = (p: ParticipantItem) => {
+    const nom = `${p.firstName} ${p.lastName}`;
+    suppression.demander({
+      ressource: `/api/participants/${p.id}`,
+      titre: `Supprimer ${nom} ?`,
+      message:
+        "Cette personne sera retirée du registre des membres. Si elle est affectée à une équipe, elle en sera également retirée. Cette suppression est définitive.",
+      succes: `${nom} supprimé`,
+      details: (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-[13px]">
+          <div className="font-semibold text-slate-900">{nom}</div>
+          <div className="mt-1 flex items-center justify-between">
+            <span className="font-semibold text-slate-700">Contact</span>
+            <span className="text-slate-900">{p.phone || p.email || '—'}</span>
+          </div>
+        </div>
+      ),
+    });
   };
 
   // Create Event
@@ -969,26 +1061,22 @@ export const AdminDashboard: React.FC = () => {
                       Jury : {m.juryName || 'Non assigné'}
                     </span>
                     <div className="flex items-center gap-1.5 shrink-0">
-                      {/* Suppression.
-                          Icône seule, comme les autres actions iconiques de
-                          l'application ; le nom accessible porte le numéro, sinon
-                          un lecteur d'écran annoncerait « bouton » sans dire
-                          lequel des six matchs de la grille. */}
-                      <button
-                        type="button"
+                      {/* Seul cas désactivable : l'état du match est visible ici,
+                          donc le serveur va refuser (400). Un match ayant un
+                          historique de score (409) ne l'est pas — cette
+                          information n'existe pas côté client, d'où un bouton
+                          actif et un message remonté tel quel. */}
+                      <BoutonSuppression
                         id={`btn-delete-match-${m.id}`}
-                        onClick={() => setMatchToDelete(m)}
+                        label={`Supprimer le match n° ${m.matchNumber}`}
                         disabled={suppressionBloquee(m.status)}
-                        aria-label={`Supprimer le match n° ${m.matchNumber}`}
                         title={
                           suppressionBloquee(m.status)
                             ? `Impossible de supprimer un match ${m.status === 'LIVE' ? 'en cours' : 'en pause'} : terminez-le d'abord.`
                             : `Supprimer le match n° ${m.matchNumber}`
                         }
-                        className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-rose-600 hover:bg-rose-50 hover:border-rose-200 transition-colors disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:text-slate-500 disabled:hover:bg-transparent disabled:hover:border-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-1"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                        onClick={() => demanderSuppressionMatch(m)}
+                      />
                       <a
                         href="/jury"
                         className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold"
@@ -1044,7 +1132,14 @@ export const AdminDashboard: React.FC = () => {
                       {t.code}
                     </span>
                   </div>
-                  <h4 className="text-base font-bold text-slate-900">{t.name}</h4>
+                  <div className="flex items-start justify-between gap-2">
+                    <h4 className="text-base font-bold text-slate-900">{t.name}</h4>
+                    <BoutonSuppression
+                      id={`btn-delete-team-${t.id}`}
+                      label={`Supprimer l'équipe ${t.name}`}
+                      onClick={() => demanderSuppressionEquipe(t)}
+                    />
+                  </div>
 
                   <div className="mt-4 pt-3 border-t border-slate-100">
                     <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
@@ -1126,9 +1221,16 @@ export const AdminDashboard: React.FC = () => {
                         {q.difficulty}
                       </span>
                     </div>
-                    <span className="text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
-                      {q.points} points • {q.timeLimitSeconds}s
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                        {q.points} points • {q.timeLimitSeconds}s
+                      </span>
+                      <BoutonSuppression
+                        id={`btn-delete-question-${q.id}`}
+                        label={`Supprimer la question ${q.text.slice(0, 60)}`}
+                        onClick={() => demanderSuppressionQuestion(q)}
+                      />
+                    </div>
                   </div>
 
                   <p className="text-sm font-bold text-slate-900 mt-1">{q.text}</p>
@@ -1170,6 +1272,9 @@ export const AdminDashboard: React.FC = () => {
                     <th className="py-3 px-4">Nom et Prénom</th>
                     <th className="py-3 px-4">Genre</th>
                     <th className="py-3 px-4">Contact</th>
+                    <th className="py-3 px-4">
+                      <span className="sr-only">Actions</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -1180,6 +1285,13 @@ export const AdminDashboard: React.FC = () => {
                       </td>
                       <td className="py-3 px-4 text-slate-600">{p.gender === 'F' ? 'Féminin' : 'Masculin'}</td>
                       <td className="py-3 px-4 text-slate-600">{p.phone || p.email || '—'}</td>
+                      <td className="py-3 px-4 text-right">
+                        <BoutonSuppression
+                          id={`btn-delete-participant-${p.id}`}
+                          label={`Supprimer ${p.firstName} ${p.lastName}`}
+                          onClick={() => demanderSuppressionParticipant(p)}
+                        />
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -1839,31 +1951,15 @@ export const AdminDashboard: React.FC = () => {
           un match programmé par erreur est un rattrapage, mais un match effacé
           ne se restitue pas. */}
       <ConfirmDialog
-        open={matchToDelete !== null}
-        title={`Supprimer le match n° ${matchToDelete?.matchNumber ?? ''} ?`}
-        message="Le match et ses questions seront effacés. Cette suppression est définitive : il n'y a pas de moyen de les récupérer."
+        open={suppression.cible !== null}
+        title={suppression.cible?.titre ?? ''}
+        message={suppression.cible?.message ?? ''}
         confirmLabel="Supprimer définitivement"
         tone="danger"
-        onConfirm={() => void confirmDeleteMatch()}
-        onCancel={() => setMatchToDelete(null)}
+        onConfirm={() => void suppression.confirmer()}
+        onCancel={suppression.annuler}
       >
-        {matchToDelete && (
-          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5">
-            <div className="text-[13px] font-semibold text-slate-900">
-              {matchToDelete.teamA?.name} contre {matchToDelete.teamB?.name}
-            </div>
-            <div className="mt-1 flex items-center justify-between text-[13px]">
-              <span className="font-semibold text-slate-700">Phase</span>
-              <span className="text-slate-900">{matchToDelete.phase}</span>
-            </div>
-            <div className="mt-1 flex items-center justify-between text-[13px]">
-              <span className="font-semibold text-slate-700">Score</span>
-              <span className="tabular-nums text-slate-900">
-                {matchToDelete.scoreA} – {matchToDelete.scoreB}
-              </span>
-            </div>
-          </div>
-        )}
+        {suppression.cible?.details}
       </ConfirmDialog>
       </div>
     </div>

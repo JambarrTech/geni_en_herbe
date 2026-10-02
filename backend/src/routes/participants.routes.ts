@@ -107,6 +107,11 @@ participantsRouter.patch('/:id', requireAuth, requireAdmin, adminWriteLimit, asy
 participantsRouter.delete('/:id', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
+    // Même raison que pour les équipes : `DELETE` sur un identifiant inconnu
+    // renvoyait `success`.
+    const [cible] = await db.select({ id: participants.id }).from(participants).where(eq(participants.id, id));
+    if (!cible) return res.status(404).json({ error: 'Membre introuvable' });
+
     await db.delete(participants).where(eq(participants.id, id));
     await logAudit(
       req.user?.uid,

@@ -67,6 +67,15 @@ categoriesRouter.patch('/:id', requireAuth, requireAdmin, adminWriteLimit, async
 categoriesRouter.delete('/:id', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
+    // Même raison que pour les équipes et les membres : `DELETE` sur un
+    // identifiant inconnu renvoyait `success`, et l'appelant croyait avoir
+    // supprimé quelque chose.
+    const [cible] = await db
+      .select({ id: categories.id })
+      .from(categories)
+      .where(eq(categories.id, id));
+    if (!cible) return res.status(404).json({ error: 'Catégorie introuvable' });
+
     await db.delete(categories).where(eq(categories.id, id));
     await logAudit(req.user?.uid, req.user?.email, 'DELETE_CATEGORY', 'category', String(id));
     res.json({ success: true });

@@ -7,6 +7,7 @@ import { logAudit } from '../server/matchEngine.ts';
 import { CONFIG, FLOW } from '../config.ts';
 import { adminWriteLimit } from '../middleware/rateLimit.ts';
 import { validateIds } from '../lib/validate.ts';
+import { isForeignKeyViolation, FK_DELETE_MESSAGES } from '../lib/dbErrors.ts';
 import { createLogger } from '../lib/logger.ts';
 
 const log = createLogger('api');
@@ -249,6 +250,15 @@ questionsRouter.delete('/:id', requireAuth, requireAdmin, adminWriteLimit, async
     );
     res.json({ success: true });
   } catch (error: any) {
+    // Une question jouée reste référencée par `matches.current_question_id`,
+    // `match_questions` et `score_events`, tous en RESTRICT. Sans ce
+    // classement, Postgres levait la violation et l'appelant recevait un 500
+    // « Erreur lors de la suppression » : impossible à distinguer d'une panne,
+    // alors que c'est le cas le plus courant — celui d'une question déjà utilisée.
+    log.error('DELETE question error', { err: error });
+    if (isForeignKeyViolation(error)) {
+      return res.status(400).json({ error: FK_DELETE_MESSAGES.question });
+    }
     res.status(500).json({ error: 'Erreur lors de la suppression' });
   }
 });

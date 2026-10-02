@@ -3,7 +3,7 @@ import { db } from '../db/index.ts';
 import { teams, teamMembers, participants } from '../db/schema.ts';
 import { eq, and } from 'drizzle-orm';
 import { requireAuth, requireAdmin, requireJuryOrAdmin, type AuthRequest } from '../middleware/auth.ts';
-import { logAudit } from '../server/matchEngine.ts';
+import { logAudit, getLiveState, broadcast } from '../server/matchEngine.ts';
 import { isForeignKeyViolation, FK_DELETE_MESSAGES } from '../lib/dbErrors.ts';
 import { getSetting } from '../lib/settings.ts';
 import { CONFIG, FLOW } from '../config.ts';
@@ -141,8 +141,35 @@ teamsRouter.patch('/:id', requireAuth, requireAdmin, adminWriteLimit, async (req
 teamsRouter.delete('/:id', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
+    // Sans cette lecture préalable, `DELETE` sur un identifiant inconnu
+    // renvoyait `{ success: true }` : l'interface annonçait « équipe supprimée »
+    // pour une équipe qui n'avait jamais existé.
+    const [cible] = await db
+      .select({ id: teams.id, eventId: teams.eventId })
+      .from(teams)
+      .where(eq(teams.id, id));
+    if (!cible) return res.status(404).json({ error: 'Équipe introuvable' });
+
     await db.delete(teams).where(eq(teams.id, id));
     await logAudit(req.user?.uid, req.user?.email, 'DELETE_TEAM', 'team', String(id));
+
+    // Le classement est bâti depuis la table `teams`, pas depuis les matchs
+    // disputés : une équipe sans aucune rencontre y figure quand même, à zéro
+    // point. Une équipe supprimée disparaît donc du podium affiché au public, et
+    // sans diffusion le fantôme tiendrait jusqu'au rechargement de la page —
+    // sur l'écran projeté de la salle, que personne ne recharge pendant un
+    // tournoi.
+    //
+    // Isolé du `try` : la ligne est DÉJÀ supprimée à ce point. Si le calcul de
+    // l'état échoue, renvoyer une erreur ferait croire que l'opération a échoué
+    // alors qu'elle a réussi — et l-admin, qui relancerait, obtiendrait un 404 sur
+    // une équipe déjà effacée. Le coût réel se limite à un podium en retard.
+    try {
+      broadcast('team_deleted', { teamId: id, liveState: await getLiveState(cible.eventId, true) });
+    } catch (erreurDiffusion) {
+      log.error('Diffusion team_deleted impossible', { err: erreurDiffusion });
+    }
+
     res.json({ success: true });
   } catch (error: any) {
     log.error('DELETE team error', { err: error });

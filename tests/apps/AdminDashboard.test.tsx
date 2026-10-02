@@ -295,6 +295,262 @@ describe('AdminDashboard — suppression d’un match', () => {
   });
 });
 
+/**
+ * Suppression des autres ressources : équipes, questions, membres.
+ *
+ * POURQUOI UN SEUL BLOC POUR LES TROIS
+ * ------------------------------------
+ * Les trois partagent désormais le même hook (`useSuppression`) et le même
+ * dialogue. Ce qui les distingue n'est pas la mécanique — c'est ce que le
+ * serveur refuse, et ce que l'interface doit annoncer. Ce sont ces différences
+ * qui sont testées, pas trois fois la même clic.
+ */
+describe('AdminDashboard — suppression des équipes, questions et membres', () => {
+  const equipe = (id: number) => ({
+    id,
+    eventId: 1,
+    name: `Alpha ${id}`,
+    code: `A${id}`,
+    members: [{ id: 100 + id, role: 'CAPTAIN' }],
+  });
+
+  const question = (id: number) => ({
+    id,
+    eventId: 1,
+    categoryId: 1,
+    categoryName: 'Chimie',
+    text: `Quel est le nombre d'Avogadro, question ${id} ?`,
+    answer: '6,022 × 10²³',
+    difficulty: 'DIFFICILE',
+    points: 20,
+    timeLimitSeconds: 60,
+  });
+
+  const membre = (id: number) => ({
+    id,
+    firstName: `Prénom${id}`,
+    lastName: `Nom${id}`,
+    gender: 'M' as const,
+    schoolId: 1,
+    phone: `77 000 00 ${id}`,
+    registrationNumber: `AE-${id}`,
+  });
+
+  /**
+ * Monte l'écran, puis ouvre l'onglet attendu.
+   *
+   * Renvoie la vue ET démonte la précédente : sans cela, `document` cumulerait
+   * les écrans des tests successifs et les `id` identiques pointeraient vers le
+   * premier monté — un faux positif silencieux sur tout ce qui suit.
+   */
+  async function mountOnglet(onglet: string, donnees: Record<string, unknown>, ancre: string) {
+    mounted?.unmount();
+    stubGet({ ...ROUTES, ...donnees });
+    mounted = render(<AdminDashboard />);
+    await waitFor(() => expect(document.getElementById('btn-publish-overview')).not.toBeNull());
+
+    fireEvent.click(document.getElementById(`tab-${onglet}`)!);
+    await waitFor(() => expect(document.getElementById(ancre)).not.toBeNull());
+    return mounted;
+  }
+
+  let mounted: ReturnType<typeof render> | null = null;
+  afterEach(() => {
+    mounted?.unmount();
+    mounted = null;
+  });
+
+  /** Le bouton de confirmation du dialogue, pas celui qui l'ouvre. */
+  function boutonConfirmer(): HTMLElement {
+    const danger = Array.from(document.querySelectorAll<HTMLElement>('dialog button')).find((b) =>
+      b.textContent?.includes('Supprimer définitivement')
+    );
+    if (!danger) throw new Error('le dialogue de suppression ne propose pas de confirmation');
+    return danger;
+  }
+
+  it('supprime une équipe après confirmation, en nommant la cible', async () => {
+    const supprimer = vi.spyOn(api, 'delete').mockResolvedValue({ success: true } as never);
+    await mountOnglet('teams', { '/api/teams': [equipe(4)] }, 'btn-add-team');
+
+    fireEvent.click(document.getElementById('btn-delete-team-4')!);
+    await waitFor(() => expect(boutonConfirmer()).toBeTruthy());
+
+    // Le nom de l'équipe est dans le dialogue ET dans le nom accessible du
+    // bouton : dans une grille de huit équipes, « bouton » sans cible laisse
+    // deviner laquelle on va effacer.
+    const dialogue = document.querySelector('dialog[open]')!;
+    expect(dialogue.textContent).toContain('Supprimer l\'équipe Alpha 4');
+    expect(dialogue.textContent).toContain('A4');
+    expect(document.getElementById('btn-delete-team-4')!.getAttribute('aria-label')).toBe(
+      "Supprimer l'équipe Alpha 4"
+    );
+
+    fireEvent.click(boutonConfirmer());
+    await waitFor(() => expect(supprimer).toHaveBeenCalledWith('/api/teams/4'));
+  });
+
+  it('refuse une équipe engagée dans un match, et remonte la raison du serveur', async () => {
+    // `matches.team_a_id` / `team_b_id` pointent sur `teams` en RESTRICT : le
+    // serveur répond 400 avec `FK_DELETE_MESSAGES.team`. Cette information n'est
+    // PAS calculable dans l'écran — une équipe engagée dans un match se présente
+    // exactement comme une équipe libre. Le message doit donc atteindre l'écran.
+    vi.spyOn(api, 'delete').mockRejectedValue(
+      new Error('Impossible de supprimer : cette équipe est engagée dans un match.')
+    );
+    await mountOnglet('teams', { '/api/teams': [equipe(4)] }, 'btn-add-team');
+
+    // Le bouton reste ACTIF : on ne peut pas savoir ici que le match existe.
+    expect((document.getElementById('btn-delete-team-4') as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(document.getElementById('btn-delete-team-4')!);
+    await waitFor(() => expect(boutonConfirmer()).toBeTruthy());
+    fireEvent.click(boutonConfirmer());
+
+    await waitFor(() => {
+      const toast = document.getElementById('admin-toast-alert');
+      expect(toast?.textContent).toContain('engagée dans un match');
+    });
+  });
+
+  it('supprime une question en montrant son énoncé et sa réponse', async () => {
+    const supprimer = vi.spyOn(api, 'delete').mockResolvedValue({ success: true } as never);
+    await mountOnglet('questions', { '/api/questions': [question(9)] }, 'btn-add-question');
+
+    fireEvent.click(document.getElementById('btn-delete-question-9')!);
+    await waitFor(() => expect(boutonConfirmer()).toBeTruthy());
+
+    // L'énoncé seul ne suffit pas : deux questions de Chimie peuvent commencer à se
+    // ressembler. La réponse officielle est ce qui confirme qu'on a choisi la
+    // bonne.
+    const dialogue = document.querySelector('dialog[open]')!;
+    expect(dialogue.textContent).toContain('Supprimer cette question ?');
+    expect(dialogue.textContent).toContain('nombre d\'Avogadro, question 9');
+    expect(dialogue.textContent).toContain('6,022');
+
+    fireEvent.click(boutonConfirmer());
+    await waitFor(() => expect(supprimer).toHaveBeenCalledWith('/api/questions/9'));
+  });
+
+  it('affiche l’énoncé dans le nom accessible du bouton de question', async () => {
+    await mountOnglet('questions', { '/api/questions': [question(9)] }, 'btn-add-question');
+
+    const etiquette = document.getElementById('btn-delete-question-9')!.getAttribute('aria-label');
+    expect(etiquette).toContain("Supprimer la question Quel est le nombre");
+    // Tronquée : une étiquette de plusieurs lignes dans une cellule de tableau
+    // est illisible au lecteur d'écran.
+    expect(etiquette!.length).toBeLessThanOrEqual('Supprimer la question '.length + 60);
+  });
+
+  it('supprime un membre, en annonçant le retrait de son équipe', async () => {
+    const supprimer = vi.spyOn(api, 'delete').mockResolvedValue({ success: true } as never);
+    await mountOnglet('participants', { '/api/participants': [membre(3)] }, 'btn-add-participant');
+
+    fireEvent.click(document.getElementById('btn-delete-participant-3')!);
+    await waitFor(() => expect(boutonConfirmer()).toBeTruthy());
+
+    // Conséquence à énoncer : `team_members.participant_id` est en CASCADE,
+    // donc la personne quitte aussi son équipe. Le dire dans le dialogue évite
+    // une découverte plus tard, quand l'équipe aura changé sans explication.
+    const dialogue = document.querySelector('dialog[open]')!;
+    expect(dialogue.textContent).toContain('Supprimer Prénom3 Nom3 ?');
+    expect(dialogue.textContent).toContain('elle en sera également retirée');
+
+    fireEvent.click(boutonConfirmer());
+    await waitFor(() => expect(supprimer).toHaveBeenCalledWith('/api/participants/3'));
+  });
+
+  it('n’envoie rien sur les trois ressources si la confirmation est annulée', async () => {
+    const supprimer = vi.spyOn(api, 'delete').mockResolvedValue({ success: true } as never);
+
+    // Le hook est partagé : une seule annulation mal câblée suffirait à rendre
+    // les trois boutons decoratoriels en parasites. On les vérifie ensemble.
+    for (const [onglet, donnees, ancre, boutonId] of [
+      ['teams', { '/api/teams': [equipe(4)] }, 'btn-add-team', 'btn-delete-team-4'],
+      ['questions', { '/api/questions': [question(9)] }, 'btn-add-question', 'btn-delete-question-9'],
+      [
+        'participants',
+        { '/api/participants': [membre(3)] },
+        'btn-add-participant',
+        'btn-delete-participant-3',
+      ],
+    ] as const) {
+      const { unmount } = await (async () => {
+        stubGet({ ...ROUTES, ...donnees });
+        const vue = render(<AdminDashboard />);
+        await waitFor(() => expect(document.getElementById('btn-publish-overview')).not.toBeNull());
+        fireEvent.click(document.getElementById(`tab-${onglet}`)!);
+        await waitFor(() => expect(document.getElementById(ancre)).not.toBeNull());
+        return vue;
+      })();
+
+      fireEvent.click(document.getElementById(boutonId)!);
+      await waitFor(() => expect(boutonConfirmer()).toBeTruthy());
+
+      const annuler = Array.from(document.querySelectorAll<HTMLElement>('dialog button')).find((b) =>
+        b.textContent?.includes('Annuler')
+      )!;
+      fireEvent.click(annuler);
+      unmount();
+    }
+
+    expect(supprimer).not.toHaveBeenCalled();
+  });
+
+  it('n’affiche qu’un seul dialogue, quel que soit le nombre de lignes', async () => {
+    // Un dialogue par ligne aurait été l'implémentation naturelle : vingt
+    // questions, vingt boîtes dans le document. Le hook partagé n'en rend qu'une,
+    // ouverte sur la ligne visée.
+    // Trois dialogues à l'écran : publication, retrait, suppression. Ce qui compte
+    // est qu'ils ne dépendent PAS du nombre de lignes — un dialogue par ligne
+    // aurait été l'implémentation naturelle, et vingt questions auraient produit
+    // vingt boîtes dans le document. On mesure donc le nombre de dialogues à
+    // trois lignes, puis à une seule.
+    const avecTrois = await mountOnglet(
+      'questions',
+      { '/api/questions': [question(1), question(2), question(3)] },
+      'btn-add-question'
+    );
+    const nombreDialogues = avecTrois.container.querySelectorAll('dialog').length;
+    avecTrois.unmount();
+    mounted = null;
+
+    const avecUne = await mountOnglet(
+      'questions',
+      { '/api/questions': [question(1)] },
+      'btn-add-question'
+    );
+    expect(avecUne.container.querySelectorAll('dialog')).toHaveLength(nombreDialogues);
+
+    // Et le dialogue ouvert est bien celui de la ligne visée, sans fuite des
+    // voisines : c'est le bug classique quand la cible est stockée dans un état
+    // partagé mal remis à zéro.
+    fireEvent.click(document.getElementById('btn-delete-question-1')!);
+    await waitFor(() => expect(boutonConfirmer()).toBeTruthy());
+    expect(
+      avecUne.container.querySelector<HTMLDialogElement>('dialog[open]')!.textContent
+    ).toContain('question 1');
+
+    // Même contrôle sur trois lignes : cliquer la deuxième n'expose ni la
+    // première ni la troisième.
+    avecUne.unmount();
+    mounted = null;
+    const avecToutes = await mountOnglet(
+      'questions',
+      { '/api/questions': [question(1), question(2), question(3)] },
+      'btn-add-question'
+    );
+
+    fireEvent.click(document.getElementById('btn-delete-question-2')!);
+    await waitFor(() => expect(boutonConfirmer()).toBeTruthy());
+
+    const dialogue = avecToutes.container.querySelector<HTMLDialogElement>('dialog[open]')!;
+    expect(dialogue.textContent).toContain('question 2');
+    expect(dialogue.textContent).not.toContain('question 1');
+    expect(dialogue.textContent).not.toContain('question 3');
+  });
+});
+
 describe('AdminDashboard — accessibilité', () => {
   it("n'a aucune violation axe sur l'aperçu", async () => {
     const { container } = await mountAdmin();
