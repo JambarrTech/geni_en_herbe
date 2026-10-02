@@ -2,60 +2,50 @@ import React from 'react';
 import { useAuth } from '../context/AuthContext.tsx';
 import { useLive } from '../context/LiveContext.tsx';
 import { AeerksLogo } from './AeerksLogo.tsx';
-import { Trophy, ShieldCheck, Tv, LogOut, LogIn, ChevronDown } from 'lucide-react';
+import { LogOut, LogIn, ChevronDown } from 'lucide-react';
 
 interface StaffNavbarProps {
-  activeView: 'live' | 'jury' | 'admin' | 'login';
+  /**
+   * Destination du bouton « Connexion » : `/jury` ou `/admin` selon l'espace
+   * qui affiche cette barre.
+   */
   appBase: '/jury' | '/admin';
 }
 
-interface NavItem {
-  id: 'live' | 'jury' | 'admin';
-  href: string;
-  label: string;
-  shortLabel: string;
-  Icon: React.ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>;
-  iconClass: string;
-}
-
-const NAV_ITEMS: NavItem[] = [
-  {
-    id: 'live',
-    href: '/',
-    label: 'Écran Live Public',
-    shortLabel: 'Live',
-    Icon: Tv,
-    iconClass: 'text-[#2563EB]',
-  },
-  {
-    id: 'jury',
-    href: '/jury',
-    label: 'Espace Jury',
-    shortLabel: 'Jury',
-    Icon: Trophy,
-    iconClass: 'text-amber-500',
-  },
-  {
-    id: 'admin',
-    href: '/admin',
-    label: 'Administration',
-    shortLabel: 'Admin',
-    Icon: ShieldCheck,
-    iconClass: 'text-[#0B3B82]',
-  },
-];
-
-export const StaffNavbar: React.FC<StaffNavbarProps> = ({ activeView, appBase }) => {
-  const { user, logout, isAdmin, isJury } = useAuth();
+/**
+ * Barre supérieure des espaces encadrants (jury, organisation).
+ *
+ * AUCUNE NAVIGATION VERS LES AUTRES ESPACES
+ * -----------------------------------------
+ * Trois liens figuraient ici : « Écran Live Public », « Espace Jury » et
+ * « Administration ». Ils ont été retirés.
+ *
+ * Ce n'est PAS une mesure de sécurité au sens strict, et il faut le dire
+ * précisément : les routes existent toujours, et ce sont les gardes de rôle
+ * côté serveur qui font foi. Un lien absent n'empêche personne d'accéder à
+ * `/admin` — il évite seulement de l'annoncer.
+ *
+ * Ce que cela règle réellement :
+ *  - un membre du jury ne voit plus un lien « Administration » qui le mène à
+ *    une erreur 403 (le filtre de rôle existait déjà, mais l'interface
+ *    promettait parfois un accès que le serveur refuse) ;
+ *  - un écran projeté ou partagé n'affiche plus de navigation interne, et ne
+ *    révèle plus l'existence des espaces encadrants à la salle ;
+ *  - une navigation accidentelle ne fait plus perdre l'état d'une saisie en
+ *    cours.
+ *
+ * Accéder aux espaces encadrants reste possible : par le bouton « Connexion »
+ * ci-contre, ou par l'URL.
+ */
+export const StaffNavbar: React.FC<StaffNavbarProps> = ({ appBase }) => {
+  const { user, logout } = useAuth();
   const { isConnected, lastUpdateAt } = useLive();
   const menuRef = React.useRef<HTMLDetailsElement>(null);
   const [menuOpen, setMenuOpen] = React.useState(false);
 
-  // Non connecté : on propose les trois espaces, la garde de rôle se fera à
-  // l'arrivée. Connecté : on ne montre que les espaces réellement accessibles.
-  const visibleItems = NAV_ITEMS.filter(
-    (item) => !user || (item.id === 'live' ? true : item.id === 'jury' ? isJury : isAdmin)
-  );
+  // Ni `isJury` ni `isAdmin` ne sont lus ici : ils servaient à décider
+  // quels liens montrer, et il n'y en a plus. Le rôle affiché vient de
+  // `user.role`, qui suffit à libeller la personne.
 
   const connectionLabel = isConnected ? 'Connecté au serveur en direct' : 'Connexion au serveur perdue — tentative de reconnexion';
 
@@ -132,35 +122,6 @@ export const StaffNavbar: React.FC<StaffNavbarProps> = ({ activeView, appBase })
           </div>
         </a>
 
-        {/* Navigation — devient un bandeau défilant horizontal sur petit écran,
-            là où elle était simplement masquée (donc inaccessible) en dessous
-            de 768 px. */}
-        <nav
-          aria-label="Navigation principale"
-          className="flex items-center gap-1 bg-slate-100/80 p-1 rounded-xl border border-slate-200/60 shrink-0 max-w-full overflow-x-auto md:overflow-visible"
-        >
-          {visibleItems.map(({ id, href, label, shortLabel, Icon, iconClass }) => {
-            const isActive = activeView === id;
-            return (
-              <a
-                key={id}
-                id={`nav-tab-${id}`}
-                href={href}
-                aria-current={isActive ? 'page' : undefined}
-                className={`flex items-center gap-2 px-3 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-1 ${
-                  isActive
-                    ? 'bg-white text-[#0B3B82] shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
-                }`}
-              >
-                <Icon className={`w-3.5 h-3.5 ${iconClass}`} aria-hidden="true" />
-                <span className="md:hidden">{shortLabel}</span>
-                <span className="hidden md:inline">{label}</span>
-              </a>
-            );
-          })}
-        </nav>
-
         {/* État temps réel + compte */}
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           <div
@@ -220,9 +181,9 @@ export const StaffNavbar: React.FC<StaffNavbarProps> = ({ activeView, appBase })
             </a>
           )}
 
-          {/* Sélecteur de profil mobile : le nom de l'utilisateur et les
-              destinations sont masqués sur petit écran, ce menu les rend
-              accessibles sans multiplier les barres. */}
+          {/* Sur petit écran, le nom de l'utilisateur et son rôle sont
+              invisibles (ils restent au-dessus sous `lg`). Ce menu les rend
+              accessibles, avec une déconnexion nommée. */}
           <details
             ref={menuRef}
             className="md:hidden relative"
@@ -244,48 +205,24 @@ export const StaffNavbar: React.FC<StaffNavbarProps> = ({ activeView, appBase })
             </summary>
             <div className="absolute right-0 top-full mt-2 w-56 rounded-xl border border-slate-200 bg-white shadow-lg p-1.5 z-50">
               {user && (
-                <div className="px-3 py-2 border-b border-slate-100 mb-1">
+                <div className="px-3 py-2">
                   <div className="text-xs font-bold text-slate-900 truncate">{user.name}</div>
                   <div className="text-[10px] text-[#0B3B82] font-semibold mt-0.5">
                     {user.role === 'ADMIN' ? 'Comité d\'Organisation' : 'Membre du Jury'}
                   </div>
                 </div>
               )}
-              {/* BUG CORRIGE : ce menu itérait sur NAV_ITEMS au lieu de
-                  visibleItems. La garde de rôle, appliquée plus haut, était donc
-                  contournée sur petit écran : un membre du jury y voyait le lien
-                  « Administration », sur lequel il tombait ensuite sur une
-                  erreur 403. Le même filtre doit governer les deux rendus, sinon
-                  l'interface promet un accès que le serveur refuse. */}
-              {visibleItems.map(({ id, href, label, Icon, iconClass }) => (
-                <a
-                  key={id}
-                  href={href}
-                  aria-current={activeView === id ? 'page' : undefined}
-                  onClick={closeMenu}
-                  className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] ${
-                    activeView === id
-                      ? 'bg-slate-100 text-[#0B3B82]'
-                      : 'text-slate-700 hover:bg-slate-100'
-                  }`}
-                >
-                  <Icon className={`w-3.5 h-3.5 ${iconClass}`} aria-hidden="true" />
-                  {label}
-                </a>
-              ))}
-              {user && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    closeMenu();
-                    logout();
-                  }}
-                  className="flex w-full items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold text-rose-600 hover:bg-rose-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
-                >
-                  <LogOut className="w-3.5 h-3.5" aria-hidden="true" />
-                  Se déconnecter
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => {
+                  closeMenu();
+                  logout();
+                }}
+                className="flex w-full items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold text-rose-600 hover:bg-rose-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+              >
+                <LogOut className="w-3.5 h-3.5" aria-hidden="true" />
+                Se déconnecter
+              </button>
             </div>
           </details>
         </div>

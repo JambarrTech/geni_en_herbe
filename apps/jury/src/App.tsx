@@ -45,7 +45,7 @@ const AppShell: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <StaffNavbar activeView={user ? 'jury' : 'login'} appBase="/jury" />
+      <StaffNavbar appBase="/jury" />
       <main>{!user ? <LoginPage /> : isJury ? <JuryDashboard /> : <AccessDenied />}</main>
     </div>
   );
