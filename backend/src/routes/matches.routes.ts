@@ -32,6 +32,7 @@ import {
   nextCursor,
   normalizeCursor,
   previousCursor,
+  rosterDeadline,
   timerUpdateForStep,
   type BroadcastCursor,
 } from '../lib/broadcastFlow.ts';
@@ -354,6 +355,17 @@ matchesRouter.post('/:id/start', requireAuth, requireJuryOrAdmin, controlLimit, 
         // zéro qu'au tout premier lancement — relancer un match déjà entamé ne
         // doit pas faire repasser l'écran public par le début de la séquence.
         broadcastStage: match.startedAt ? match.broadcastStage : BROADCAST_STAGE.ROSTER,
+        // L'effectif est la seule étape minutée du scénario. Au moment du
+        // lancement, personne n'a encore pris la main : le jury vient d'appuyer
+        // sur « Démarrer » et se tourne vers le micro, donc revenir sur
+        // l'ordinateur pour appuyer sur « Étape suivante » est un oubli banal.
+        // Passé ce délai, l'écran public enchaîne seul sur la question
+        // (cf. `autoAdvanceRosterStage`, dans `server/matchEngine.ts`).
+        //
+        // Armée UNIQUEMENT au premier lancement : relancer un match déjà entamé
+        // laisse l'échéance nulle, donc l'écran public ne bougera pas tout seul
+        // sous les yeux d'un jury en pleine rencontre.
+        broadcastRosterUntil: match.startedAt ? null : rosterDeadline(new Date()),
         timerSecondsLeft: duration,
         timerDuration: duration,
         // Le chrono est AMORCÉ, pas lancé.
@@ -1151,6 +1163,17 @@ matchesRouter.post('/:id/broadcast-step', requireAuth, requireJuryOrAdmin, contr
       .update(matches)
       .set({
         broadcastStage: target.stage,
+        // INVARIANT DE L'ÉCHÉANCE : elle n'existe que pendant l'étape `ROSTER`,
+        // posée à l'entrée et effacée à la sortie.
+        //
+        // L'effacer est ce qui fait qu'un retour en arrière du jury vers
+        // l'effectif — pour corriger une annonce, ou reprendre la présentation
+        // des équipes — n'est jamais neutralisé par une bascule automatique
+        // résiduelle. Sans cet effacement, revenir sur `ROSTER` ressusciterait
+        // une échéance déjà dépassée et l'écran quitterait l'effectif dans la
+        // seconde où le jury y revient.
+        broadcastRosterUntil:
+          target.stage === BROADCAST_STAGE.ROSTER ? rosterDeadline(new Date()) : null,
         ...(questionChanged
           ? {
               currentQuestionIndex: target.questionIndex,

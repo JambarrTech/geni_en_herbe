@@ -224,6 +224,74 @@ export function stageIsPerMatch(stage: BroadcastStage): boolean {
   return stage === BROADCAST_STAGE.ROSTER || stage === BROADCAST_STAGE.FINAL;
 }
 
+/**
+ * Durée d'affichage de l'effectif des équipes avant bascule sur la question.
+ *
+ * L'effectif est la SEULE étape minutée du scénario. Toutes les autres attendent
+ * le jury, parce que c'est lui qui parle à ce moment-là : le laisser seul devant
+ * l'écran pendant une réponse prendrait le contrôle de son propre match.
+ *
+ * Au lancement en revanche, personne n'a encore pris la main — le jury vient
+ * d'appuyer sur « Démarrer » et se tourne vers le micro. Sans bascule
+ * automatique, il faut revenir sur l'ordinateur pendant qu'il annonce le match,
+ * et l'oubli est banal.
+ *
+ * Vingt secondes : de quoi lire une dizaine de noms à voix haute sans hâter. Une
+ * valeur plus courte couperait la présentation ; une plus longue laisserait un
+ * écran figé que personne n'ose interrompre.
+ */
+export const ROSTER_STAGE_SECONDS = 20;
+
+/**
+ * Faut-il quitter l'effectif des équipes maintenant ?
+ *
+ * PURE ET SANS HORLOGE : l'instant courant est fourni en paramètre. C'est ce qui
+ * rend la décision testable — et elle mérite de l'être, parce que la condition
+ * « l'étape vaut ROSTER ET l'échéance est dépassée » est exactement le genre de
+ * double condition dont un des deux termes s'oublie en route.
+ *
+ * Le second terme n'est pas une précaution : il porte l'invariant du stockage.
+ * L'échéance est effacée dès que le curseur quitte l'effectif, donc une
+ * échéance périmée ne devrait jamais coexister avec une autre étape. Si elle le
+ * fait quand même — ligne écrite à la main, course entre deux processus, déploiement
+ * à moitié appliqué — le bon comportement est de NE PAS basculer : sans échéance,
+ * on ne peut rien décider, et décider quand même reviendrait à faire avancer un
+ * écran sur une hypothèse.
+ *
+ * Conséquence directe, et elle est voulue : revenir sur l'effectif au bouton
+ * « retour » du jury n'est JAMAIS neutralisé par une bascule automatique. C'est
+ * le jury qui décide si ce retour doit tenir.
+ */
+export function rosterShouldAutoAdvance(input: {
+  /**
+   * Étape courante, telle que stockée — donc du texte brut, pas un `BroadcastStage`.
+   *
+   * Typée ainsi à dessein : la colonne est du texte libre en base (cf.
+   * `isBroadcastStage`), et la comparaison doit rester possible depuis la route
+   * comme depuis la boucle serveur sans passage obligé par un narrowing. Une
+   * étape inconnue n'est pas `ROSTER`, donc aucune bascule — c'est le
+   * comportement sûr pour une valeur corrompue.
+   */
+  stage: string | null | undefined;
+  rosterUntil: Date | null | undefined;
+  now: Date;
+}): boolean {
+  if (input.stage !== BROADCAST_STAGE.ROSTER) return false;
+  if (!input.rosterUntil) return false;
+  return input.now.getTime() >= new Date(input.rosterUntil).getTime();
+}
+
+/**
+ * Échéance de sortie de l'effectif, ou `null` si l'étape n'en a pas.
+ *
+ * On retourne la date plutôt qu'un booléen pour que l'appelant ne puisse pas
+ * écrire `broadcastRosterUntil = null` en croyant avoir armé le minutage : la
+ * signature rend l'oubli visible.
+ */
+export function rosterDeadline(now: Date): Date {
+  return new Date(now.getTime() + ROSTER_STAGE_SECONDS * 1000);
+}
+
 /** Action demandée par le jury sur la diffusion. */
 export type BroadcastAction = 'next' | 'previous' | 'restart';
 

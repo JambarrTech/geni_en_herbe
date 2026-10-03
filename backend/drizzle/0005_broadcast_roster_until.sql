@@ -1,0 +1,21 @@
+-- Échéance de sortie de l'étape `ROSTER` (effectif des équipes).
+--
+-- L'effectif est la seule étape minutée du scénario de diffusion : au lancement,
+-- le jury vient d'appuyer sur « Démarrer » et se tourne vers le micro, donc
+-- l'écran public doit enchaîner seul sur la question. Toutes les autres étapes
+-- attendent le jury, parce que c'est lui qui parle.
+--
+-- Une date, pas un compteur : la boucle serveur existante (`timerLoopTick`, déjà
+-- appelée une fois par seconde) la relit, et elle survit à un redémarrage du
+-- worker. Un minuteur en mémoire perdrait la bascule en cours de concours.
+--
+-- Invariant appliqué par le code : cette colonne n'est renseignée QUE pendant que
+-- `broadcast_stage` vaut 'ROSTER'. Elle est posée à l'entrée de l'étape et
+-- effacée à la sortie, sinon un retour en arrière du jury ressusciterait une
+-- échéance périmée et quitterait l'effectif dans la seconde.
+--
+-- NULLABLE, et non pas NOT NULL avec une valeur par défaut : une date par défaut
+-- ferait qu'un match programmé mais jamais lancé serait considéré comme dû pour
+-- la bascule. `NULL` veut dire « aucune bascule programmée », ce qui est l'état
+-- normal de tous les matchs qui n'ont pas commencé.
+ALTER TABLE "matches" ADD COLUMN "broadcast_roster_until" timestamp;

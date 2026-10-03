@@ -41,6 +41,7 @@ export const REQUIRED_COLUMNS: readonly { table: string; column: string; since: 
   { table: 'sessions', column: 'token_hash', since: '0003_sessions_table' },
   { table: 'sessions', column: 'expires_at', since: '0003_sessions_table' },
   { table: 'matches', column: 'broadcast_stage', since: '0004_broadcast_stage' },
+  { table: 'matches', column: 'broadcast_roster_until', since: '0005_broadcast_roster_until' },
 ];
 
 /**

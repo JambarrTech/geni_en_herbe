@@ -384,3 +384,80 @@ describe('JuryDashboard — accessibilité', () => {
     expect(await axe(container)).toHaveNoViolations();
   });
 });
+
+describe('bascule automatique de l effectif', () => {
+  /**
+   * L effectif est la SEULE etape minutee du scenario : au lancement, le jury
+   * vient d appuyer sur « Demarrer » et se tourne vers le micro, donc revenir sur
+   * l ordinateur pour appuyer sur « Etape suivante » est un oubli banal.
+   *
+   * Ces tests verrouillent ce que le jury VOIT de cette bascule. Une bascule
+   * automatique qu il ne voit pas venir est pire qu une absence de bascule :
+   * l ecran change au milieu d une phrase et personne ne sait si c est prevu.
+   */
+  function matchDetailAvec(broadcast: Record<string, unknown>) {
+    return {
+      '/api/matches/5': makeDetail({ broadcast }),
+      '/api/matches': [MATCH_SUMMARY],
+      '/api/score-events': [],
+      '/api/settings/active-event': { id: 1, name: 'Geni en Herbe 2026' },
+    };
+  }
+
+  beforeEach(() => {
+    vi.useRealTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('annonce le compte a rebours quand une bascule est programmee', async () => {
+    // Echeance dans 20 s : le texte doit apparaitre ET etre credible. Un
+    // compte a rebours qui affiche 0 pendant 20 secondes est pire que pas
+    // d annonce du tout.
+    const dans20s = new Date(Date.now() + 20_000).toISOString();
+    stubGet(matchDetailAvec({ stage: 'ROSTER', questionIndex: 0, questionCount: 2, stepNumber: 1, totalSteps: 10, canAdvance: true, canRewind: false, revealsAnswer: false, showsRoster: true, rosterUntil: dans20s }));
+
+    render(<JuryDashboard />);
+
+    const annonce = await screen.findByTestId('roster-auto-advance');
+    expect(annonce.textContent).toMatch(/Bascule automatique dans \d+ s/);
+    expect(annonce.textContent).toMatch(/question 1/);
+  });
+
+  it('n annonce RIEN quand aucune bascule n est programmee', async () => {
+    // Cas ordinaire : le jury a repris la main, ou le match n a pas demarre. Une
+    // annonce permanente « bascule automatique dans » alors qu il ne se passe
+    // rien est un mensonge de l interface.
+    stubGet(matchDetailAvec({ stage: 'ROSTER', questionIndex: 0, questionCount: 2, stepNumber: 1, totalSteps: 10, canAdvance: true, canRewind: false, revealsAnswer: false, showsRoster: true, rosterUntil: null }));
+
+    render(<JuryDashboard />);
+
+    await screen.findByText(/Effectif des équipes/);
+    expect(screen.queryByTestId('roster-auto-advance')).toBeNull();
+  });
+
+  it('n annonce rien sur une etape que le jury pilote', async () => {
+    // L echeance ne doit jamais apparaitre ailleurs qu sur l effectif : c est
+    // la seule etape qui parte seule, et une annonce sur une autre etape
+    // apprendrait au jury a ignorer le texte.
+    stubGet(matchDetailAvec({ stage: 'QUESTION', questionIndex: 0, questionCount: 2, stepNumber: 2, totalSteps: 10, canAdvance: true, canRewind: true, revealsAnswer: false, showsRoster: false, rosterUntil: new Date(Date.now() + 20_000).toISOString() }));
+
+    render(<JuryDashboard />);
+
+    await screen.findByText(/Question à l’écran/);
+    expect(screen.queryByTestId('roster-auto-advance')).toBeNull();
+  });
+
+  it('disparait une fois l echeance depassee', async () => {
+    // L ecran est deja parti : « dans 0 s » serait faux. L absence d annonce
+    // vaut mieux qu un compte a rebours qui traine a zero.
+    stubGet(matchDetailAvec({ stage: 'ROSTER', questionIndex: 0, questionCount: 2, stepNumber: 1, totalSteps: 10, canAdvance: true, canRewind: false, revealsAnswer: false, showsRoster: true, rosterUntil: new Date(Date.now() - 5_000).toISOString() }));
+
+    render(<JuryDashboard />);
+
+    await screen.findByText(/Effectif des équipes/);
+    expect(screen.queryByTestId('roster-auto-advance')).toBeNull();
+  });
+});

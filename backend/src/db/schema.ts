@@ -182,6 +182,28 @@ export const matches = pgTable(
     // déroulé. Elle est aussi la valeur de repli pour une ligne dont l'étape a
     // été corrompue (cf. `normalizeCursor`).
     broadcastStage: text('broadcast_stage').notNull().default('ROSTER'), // 'ROSTER' | 'QUESTION' | 'ANSWER_A' | 'ANSWER_B' | 'REVEAL' | 'FINAL'
+    // Instant limiteau de l'etape `ROSTER`.
+    //
+    // L'effectif des equipes est la SEULE etape minutee du scenario : au-dela,
+    // chaque cran attend le jury, parce que c'est lui qui parle. Au lancement, en
+    // revanche, personne n'a encore pris la main — le jury vient d'appuyer sur
+    // « Demarrer » et se tourne vers le micro. L'ecranpublic doit donc enchainer
+    // tout seul, sans qu'il ait a revenir sur l'ordinateur.
+    //
+    // Une date, et non un compteur : elle est verifiee par la boucle serveur
+    // existante (`timerLoopTick`), qui tourne deja une fois par seconde, et elle
+    // survit a un redemarrage. Un `setTimeout` en memoire, lui, perdrait l'effet
+    // de la bascule au moindre redemarrage du worker en cours de concours.
+    //
+    // Invariant : cette date n'existe QUE pendant que l'etape vaut `ROSTER` — elle
+    // est posee a l'entree et effacee a la sortie. Sans ca, revenir en arriere
+    // sur l'effectif ressusciterait une echeance deja passee, et l'ecran
+    // quitterait l'effectif dans la meme seconde ou le jury y revient.
+    // Meme convention que `timer_started_at` (timestamp sans fuseau) : la
+    // comparaison se fait en JavaScript contre l'horloge murale du serveur, et
+    // un melange de `timestamp` et `timestamptz` dans une meme table rendrait
+    // cette comparaison dependante d'un decalage silencieux.
+    broadcastRosterUntil: timestamp('broadcast_roster_until'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },

@@ -32,6 +32,9 @@ import {
   previousCursor,
   stageIsPerMatch,
   stageIsPerQuestion,
+  rosterDeadline,
+  rosterShouldAutoAdvance,
+  ROSTER_STAGE_SECONDS,
   timerUpdateForStep,
 } from '../src/lib/broadcastFlow.ts';
 
@@ -526,5 +529,104 @@ describe('timerUpdateForStep — le chrono suit le scenario, pas la machine', ()
       }
       cursor = next;
     }
+  });
+});
+
+describe('rosterShouldAutoAdvance — la bascule minutee de l effectif', () => {
+  const now = new Date('2026-10-03T20:00:00.000Z');
+  const dans10s = new Date('2026-10-03T20:00:10.000Z');
+  const passe = new Date('2026-10-03T19:59:50.000Z');
+
+  test('bascule une fois l echeance depassee', () => {
+    assert.equal(
+      rosterShouldAutoAdvance({ stage: 'ROSTER', rosterUntil: passe, now }),
+      true
+    );
+  });
+
+  test('attend le jury tant que l echeance n est pas atteinte', () => {
+    assert.equal(
+      rosterShouldAutoAdvance({ stage: 'ROSTER', rosterUntil: dans10s, now }),
+      false
+    );
+  });
+
+  test('l echeance exacte declenche la bascule', () => {
+    // `>=` et non `>` : a l instant exact, le delai est atteint. Le cas
+    // manquant d'une seconde ferait rester l effectif une seconde de trop, et
+    // comme le passage a l etape QUESTION arme le chrono, cette seconde
+    // retranchee sur rien devient une seconde perdue pour la question.
+    assert.equal(
+      rosterShouldAutoAdvance({ stage: 'ROSTER', rosterUntil: now, now }),
+      true
+    );
+  });
+
+  test('AUCUNE echeance ne se resusciterait sur une autre etape', () => {
+    // C'est l invariant de stockage. Si l echeance survivait a la sortie de
+    // l effectif, revenir en arriere au bouton du jury la reactiverait et
+    // l ecran quitterait l effectif dans la seconde ou le jury y revient -
+    // exactement ce qu'on cherche a eviter.
+    for (const stage of ['QUESTION', 'ANSWER_A', 'ANSWER_B', 'REVEAL', 'FINAL']) {
+      assert.equal(
+        rosterShouldAutoAdvance({ stage, rosterUntil: passe, now }),
+        false,
+        `${stage} ne doit jamais declencher la bascule de l effectif`
+      );
+    }
+  });
+
+  test('sans echeance, rien ne bouge - meme sur l effectif', () => {
+    // Aucune echeance ne signifie « aucune bascule programmee » : l etat
+    // normal de tous les matchs ou le jury a repris la main. Inventer une
+    // decision quand il n y a pas d echeance reviendrait a faire bouger un ecran
+    // sur une hypothese.
+    for (const rosterUntil of [null, undefined]) {
+      assert.equal(rosterShouldAutoAdvance({ stage: 'ROSTER', rosterUntil, now }), false);
+    }
+  });
+
+  test('une etape corrompue ne declenche AUCUNE bascule', () => {
+    // La colonne est du texte libre : une valeur saisie a la main ou un residue
+    // de deploiement ne doit jamais passer pour `ROSTER`.
+    for (const stage of ['ROSTER ', 'roster', 'EFFECTIF', '', null, undefined, 42]) {
+      assert.equal(
+        rosterShouldAutoAdvance({ stage, rosterUntil: passe, now }),
+        false,
+        `${String(stage)} ne doit pas passer pour l effectif`
+      );
+    }
+  });
+});
+
+describe('rosterDeadline — la date d echeance', () => {
+  test('repose sur ROSTER_STAGE_SECONDS', () => {
+    const depart = new Date('2026-10-03T20:00:00.000Z');
+    const echeance = rosterDeadline(depart);
+    assert.equal(echeance.getTime() - depart.getTime(), ROSTER_STAGE_SECONDS * 1000);
+  });
+
+  test('ROSTER_STAGE_SECONDS laisse le temps de lire les noms', () => {
+    // Douze secondes ne suffisent pas pour lire deux listes de noms a voix haute ;
+    // au-dela d une minute, l ecran reste fige et personne n ose l interrompre.
+    // La valeur est un choix de mise en scene : elle est donc nommee et bornee,
+    // plutot que laissee au hasard d une division par 1000 quelque part.
+    assert.ok(ROSTER_STAGE_SECONDS >= 10, 'trop court pour presenter les equipes');
+    assert.ok(ROSTER_STAGE_SECONDS <= 60, 'trop long : l ecran resterait fige');
+  });
+
+  test('ne depend pas de l heure locale', () => {
+    // La date est comparee a l horloge murale du serveur. Construire l echeance
+    // par addition de millisecondes evite tout passage par une chaine de
+    // caracteres et donc tout decalage de fuseau.
+    const depart = new Date('2026-10-03T20:00:00.000Z');
+    assert.equal(rosterDeadline(depart).toISOString(), '2026-10-03T20:00:20.000Z');
+  });
+
+  test('une echeance fraichement posee n est pas deja depassee', () => {
+    // Le cas du double appel : si `rosterDeadline` rendait une date anterieure,
+    // le premier tick qui verrait le match le basculerait dans la meme seconde.
+    const depart = new Date();
+    assert.equal(rosterShouldAutoAdvance({ stage: 'ROSTER', rosterUntil: rosterDeadline(depart), now: depart }), false);
   });
 });

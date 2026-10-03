@@ -153,6 +153,19 @@ export interface MatchBroadcast {
   revealsAnswer: boolean;
   /** L'effectif des équipes est-il diffusé à cette étape ? */
   showsRoster: boolean;
+  /**
+   * Instantan où l'écran quittera seul l'effectif des équipes.
+   *
+   * `null` quand aucune bascule n'est programmée : soit l'étape courante n'est
+   * pas l'effectif, soit le jury a pris le contrôle (relance d'un match déjà
+   * entamé).
+   *
+   * Envoyé pour que le jury VOIE que l'écran va bouger sans lui. Une bascule
+   * automatique qu'il ne voit pas venir est pire qu'une absence de bascule : au
+   * milieu d'une phrase, l'écran change sous ses yeux et il ne sait pas si c'est
+   * prévu.
+   */
+  rosterUntil?: string | null;
 }
 
 export interface MatchItem {

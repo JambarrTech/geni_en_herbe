@@ -14,6 +14,7 @@ import {
   resolveScoreShortcut,
   type BroadcastAction,
 } from '../lib/juryShortcuts.ts';
+import { useRosterCountdown } from '../lib/useRosterCountdown.ts';
 import {
   Play,
   Pause,
@@ -480,6 +481,25 @@ export const JuryDashboard: React.FC = () => {
     broadcast && broadcastStage && !STAGES_PER_MATCH.includes(broadcastStage)
       ? `Question ${broadcast.questionIndex + 1} / ${broadcast.questionCount}`
       : null;
+
+  // Compte à rebours de la bascule automatique de l'effectif.
+  //
+  // Le décompte est fait ICI, sur l'horloge du poste du jury, et non par le
+  // serveur : c'est un affichage d'assistance, et il n'a pas à être exact au
+  // tick près — l'échéance affichée est la même que celle que le serveur
+  // compare. Le timer local ne sert qu'à rafraîchir le texte, pas à décider.
+  //
+  // Il s'affiche seulement s'il reste du temps : à zéro, l'écran est déjà
+  // parti et l'annonce « bascule automatique dans 0 s » serait fausse.
+  //
+  // La condition porte sur `showsRoster` ET non seulement sur la présence d'une
+  // échéance. Le serveur n'envoie déjà jamais d'échéance ailleurs, mais une
+  // annonce « l'écran enchaquera seul » affichée sur une étape que le jury
+  // pilote lui apprendrait à ignorer le texte — sur une information qui doit
+  // précisément avoir l'air fiable.
+  const rosterAutoAdvanceSeconds = useRosterCountdown(
+    broadcast?.showsRoster ? broadcast.rosterUntil : null
+  );
 
   // On ne peut pas scorer un match non démarré, ni sans question courante :
   // le bouton « Faux (0 pt) » envoyait alors `questionId: undefined` et
@@ -1102,6 +1122,15 @@ export const JuryDashboard: React.FC = () => {
                       <p className="mt-1.5 text-xs font-semibold text-amber-800">
                         Les scores et points se valident depuis les boutons des
                         équipes ci-dessus, comme d'habitude.
+                      </p>
+                    )}
+                    {rosterAutoAdvanceSeconds !== null && (
+                      <p
+                        data-testid="roster-auto-advance"
+                        className="mt-1.5 text-xs font-semibold text-sky-800"
+                      >
+                        Bascule automatique dans {rosterAutoAdvanceSeconds} s :
+                        l'écran enchaquera seul sur la question 1.
                       </p>
                     )}
                   </div>
