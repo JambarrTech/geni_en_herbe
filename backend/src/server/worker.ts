@@ -54,6 +54,7 @@ const app = http.createServer((req, res) => {
   }
 
   res.setHeader('Content-Type', 'application/json');
+  res.setHeader('X-Leader', leaderHeld ? '1' : '0');
   res.end(
     JSON.stringify({
       status: 'ok',
@@ -157,6 +158,14 @@ app.listen(PORT, '0.0.0.0', async () => {
   log.info(`Sonde de vivacite sur http://0.0.0.0:${PORT}`, {
     instance: workerInstanceId,
   });
+
+  // Vérification critique : on NE démarre PAS si DATABASE_URL pointe vers un pooler
+  // en mode transaction. Le verrou de leader serait invalide et le chrono corrompu
+  // sans erreur visible. Mieux vaut un crash franc au démarrage.
+  if (!assertDirectConnection()) {
+    log.error('DATABASE_URL invalide (pooler transaction) : arrêt immédiat du worker.');
+    process.exit(1);
+  }
 
   const obtenu = await tryBecomeLeader();
   if (!obtenu) {

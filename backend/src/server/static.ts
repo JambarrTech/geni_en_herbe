@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import httpProxy from 'http-proxy';
+import { Client } from 'pg';
 import { securityHeaders } from '../lib/securityHeaders.ts';
 import { CONFIG } from '../config.ts';
 import { createLogger } from '../lib/logger.ts';
@@ -148,7 +149,7 @@ const applySecurityHeaders = (req: http.IncomingMessage, res: http.ServerRespons
 };
 
 // --- Sonde de vivacité (avant tout le reste) ------------------------------
-server.on('request', (req, res) => {
+server.on('request', async (req, res) => {
   // La sonde passe avant la CSP : une sonde qui dépend de la politique de
   // sécurité est une sonde qui tombe au premier durcissement.
   if (req.url === '/__static_health') {
@@ -182,6 +183,52 @@ server.on('request', (req, res) => {
         upstream_errors: () => upstreamErrors,
       })
     );
+    return;
+  }
+
+  // Healthcheck global : ping API, WS, Worker et DB.
+  // C'est LE point de vérité pour Render : si l'un des 4 services est KO,
+  // le déploiement est marqué unhealthy et redémarré.
+  if (req.url === '/health') {
+    const checks = await Promise.allSettled([
+      // API
+      fetch(`${API_TARGET}/api/health`, { signal: AbortSignal.timeout(3000) })
+        .then(r => ({ name: 'api', ok: r.ok, status: r.status }))
+        .catch(e => ({ name: 'api', ok: false, error: String(e) })),
+      // WS (sonde HTTP sur le port WS)
+      fetch(`http://127.0.0.1:${Number(process.env.WS_PORT) || CONFIG.WS_PORT}/`, { signal: AbortSignal.timeout(3000) })
+        .then(r => ({ name: 'ws', ok: r.ok, status: r.status }))
+        .catch(e => ({ name: 'ws', ok: false, error: String(e) })),
+      // Worker
+      fetch(`http://127.0.0.1:${Number(process.env.WORKER_PORT) || CONFIG.WORKER_PORT}/`, { signal: AbortSignal.timeout(3000) })
+        .then(r => ({ name: 'worker', ok: r.ok, status: r.status, leader: r.headers.get('x-leader') === '1' }))
+        .catch(e => ({ name: 'worker', ok: false, error: String(e) })),
+      // DB
+      (async () => {
+        const client = new Client({ connectionString: process.env.DATABASE_URL, connectionTimeoutMillis: 3000, ssl: { rejectUnauthorized: true } });
+        try {
+          await client.connect();
+          await client.query('SELECT 1');
+          await client.end();
+          return { name: 'db', ok: true };
+        } catch (e) {
+          return { name: 'db', ok: false, error: String(e) };
+        }
+      })(),
+    ]);
+
+    const results = checks.map(c => c.status === 'fulfilled' ? c.value : { name: 'unknown', ok: false, error: c.reason });
+    const allOk = results.every(r => r.ok);
+    const statusCode = allOk ? 200 : 503;
+
+    res.statusCode = statusCode;
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Cache-Control', 'no-store');
+    res.end(JSON.stringify({
+      status: allOk ? 'healthy' : 'degraded',
+      timestamp: new Date().toISOString(),
+      services: results,
+    }));
     return;
   }
 

@@ -1,5 +1,4 @@
 import 'dotenv/config';
-import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { db, createPool } from './index.ts';
 import { users } from './schema.ts';
@@ -23,7 +22,6 @@ if (existing) {
   console.log(`Compte administrateur mis à jour : ${email}`);
 } else {
   await db.insert(users).values({
-    uid: `seed_admin_${randomUUID()}`,
     name: 'Jambarr Tech',
     email,
     role: 'ADMIN',

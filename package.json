@@ -11,7 +11,7 @@
     "dev": "node scripts/dev.mjs",
     "serve": "node scripts/serve.mjs",
     "build": "node scripts/build.mjs",
-    "typecheck": "node scripts/typecheck.mjs",
+    "typecheck": "node scripts/typecheck.mjs && node scripts/check-broadcast-stage.mjs",
     "lint": "eslint apps/live/src apps/jury/src apps/admin/src shared backend/src tests",
     "test": "npm run test:back && npm run test:front",
     "test:back": "node --import tsx --test backend/test/*.test.mjs tests/scripts/*.test.mjs",
@@ -19,9 +19,8 @@
     "test:watch": "vitest",
     "verify:css": "node scripts/verify-build-output.mjs",
     "verify:coverage": "node scripts/audit-css-coverage.mjs",
-    "vercel:backend": "node scripts/set-vercel-backend.mjs",
-    "vercel:assemble": "npm run build && node scripts/assemble-vercel-dist.mjs",
-    "render:check": "node scripts/check-render-blueprint.mjs"
+    "render:check": "node scripts/check-render-blueprint.mjs",
+    "check:broadcast-stage": "node scripts/check-broadcast-stage.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",

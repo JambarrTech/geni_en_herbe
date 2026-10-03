@@ -1,4 +1,4 @@
-import { boolean, index, integer, pgTable, serial, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
+import { boolean, date, index, integer, pgTable, serial, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
 // 0. Schools (établissements de rattachement des participants)
@@ -17,7 +17,6 @@ export const schools = pgTable('schools', {
 // 1. Users (Admins and Jurys)
 export const users = pgTable('users', {
   id: serial('id').primaryKey(),
-  uid: text('uid').notNull().unique(), // Firebase Auth UID or system id
   name: text('name').notNull(),
   email: text('email').notNull().unique(),
   role: text('role').notNull().default('JURY'), // 'ADMIN' | 'JURY'
@@ -33,8 +32,8 @@ export const events = pgTable('events', {
   name: text('name').notNull(),
   edition: text('edition').notNull(), // e.g. "Édition 2026"
   description: text('description'),
-  startDate: text('start_date'),
-  endDate: text('end_date'),
+  startDate: date('start_date'),
+  endDate: date('end_date'),
   location: text('location').notNull().default('Keur Salla Mbatta'),
   status: text('status').notNull().default('READY'), // 'DRAFT' | 'REGISTRATION' | 'READY' | 'RUNNING' | 'PAUSED' | 'FINISHED' | 'RESULTS_PENDING' | 'RESULTS_PUBLISHED' | 'ARCHIVED'
   resultsPublished: boolean('results_published').notNull().default(false),
@@ -51,7 +50,7 @@ export const participants = pgTable(
     firstName: text('first_name').notNull(),
     lastName: text('last_name').notNull(),
     gender: text('gender').default('M'), // 'M' | 'F'
-    dateOfBirth: text('date_of_birth'),
+    dateOfBirth: date('date_of_birth'),
     phone: text('phone'),
     email: text('email'),
     photo: text('photo'),

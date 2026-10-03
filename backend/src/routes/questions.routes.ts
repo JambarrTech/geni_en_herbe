@@ -1,7 +1,7 @@
 import { Router, type Response } from 'express';
 import { db } from '../db/index.ts';
 import { questions, categories } from '../db/schema.ts';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, sql } from 'drizzle-orm';
 import { requireAuth, requireAdmin, type AuthRequest } from '../middleware/auth.ts';
 import { logAudit } from '../server/matchEngine.ts';
 import { CONFIG, FLOW } from '../config.ts';
@@ -107,36 +107,56 @@ function validateQuestionPayload(body: any, partial: boolean) {
 }
 
 // La banque de questions contient les réponses officielles : accès ADMIN uniquement
-questionsRouter.get('/', requireAuth, requireAdmin, async (_req: AuthRequest, res: Response) => {
+// Pagination : ?page=1&limit=50 (défaut 50, max 200)
+questionsRouter.get('/', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
-    const list = await db
-      .select({
-        id: questions.id,
-        categoryId: questions.categoryId,
-        categoryName: categories.name,
-        eventId: questions.eventId,
-        text: questions.text,
-        answer: questions.answer,
-        type: questions.type,
-        difficulty: questions.difficulty,
-        points: questions.points,
-        timeLimitSeconds: questions.timeLimitSeconds,
-        options: questions.options,
-        explanation: questions.explanation,
-        mediaUrl: questions.mediaUrl,
-        active: questions.active,
-        createdAt: questions.createdAt,
-      })
-      .from(questions)
-      .innerJoin(categories, eq(questions.categoryId, categories.id))
-      .orderBy(desc(questions.id));
+    const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit as string, 10) || 50));
+    const offset = (page - 1) * limit;
+
+    const [list, [{ total }]] = await Promise.all([
+      db
+        .select({
+          id: questions.id,
+          categoryId: questions.categoryId,
+          categoryName: categories.name,
+          eventId: questions.eventId,
+          text: questions.text,
+          answer: questions.answer,
+          type: questions.type,
+          difficulty: questions.difficulty,
+          points: questions.points,
+          timeLimitSeconds: questions.timeLimitSeconds,
+          options: questions.options,
+          explanation: questions.explanation,
+          mediaUrl: questions.mediaUrl,
+          active: questions.active,
+          createdAt: questions.createdAt,
+        })
+        .from(questions)
+        .innerJoin(categories, eq(questions.categoryId, categories.id))
+        .orderBy(desc(questions.id))
+        .limit(limit)
+        .offset(offset),
+      db
+        .select({ total: sql<number>`count(*)::int` })
+        .from(questions),
+    ]);
 
     const parsed = list.map((q) => ({
       ...q,
       options: parseOptions(q.options),
     }));
 
-    res.json(parsed);
+    res.json({
+      data: parsed,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    });
   } catch (error: any) {
     log.error('Erreur chargement questions', { err: error });
     res.status(500).json({ error: 'Impossible de charger les questions' });

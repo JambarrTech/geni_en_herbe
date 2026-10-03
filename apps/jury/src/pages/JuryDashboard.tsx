@@ -260,13 +260,50 @@ export const JuryDashboard: React.FC = () => {
   const liveMatch = liveState?.activeMatch;
   const liveMatchId = liveMatch?.id ?? null;
   const liveQuestionId = liveMatch?.currentQuestionId ?? null;
-  const liveScoreA = liveMatch?.scoreA ?? null;
-  const liveScoreB = liveMatch?.scoreB ?? null;
 
+  // Ne PAS surveiller liveScoreA/liveScoreB : ils changent à chaque point et
+  // provoqueraient un refetch complet. On patche matchDetails localement via
+  // l'effet ci-dessous, qui fusionne les scores depuis liveState.
   useEffect(() => {
     if (selectedMatchId == null) return;
     void loadMatchDetails(selectedMatchId);
-  }, [selectedMatchId, liveMatchId, liveQuestionId, liveScoreA, liveScoreB, loadMatchDetails]);
+  }, [selectedMatchId, liveMatchId, liveQuestionId, loadMatchDetails]);
+
+  // Patch local des scores depuis liveState (évite le refetch sur score_updated).
+  // liveState est mis à jour par le WebSocket à chaque score_updated.
+  useEffect(() => {
+    if (!matchDetails || !liveState?.activeMatch) return;
+    if (liveState.activeMatch.id !== matchDetails.id) return;
+
+    // Fusionne les champs qui changent souvent (scores, timer) sans refetch.
+    setMatchDetails((prev) => {
+      if (!prev) return prev;
+      const liveM = liveState.activeMatch;
+      if (!liveM) return prev;
+      if (
+        prev.scoreA === liveM.scoreA &&
+        prev.scoreB === liveM.scoreB &&
+        prev.timerSecondsLeft === liveM.timerSecondsLeft &&
+        prev.timerIsRunning === liveM.timerIsRunning &&
+        prev.currentQuestionId === liveM.currentQuestionId &&
+        prev.currentQuestionIndex === liveM.currentQuestionIndex &&
+        prev.broadcast?.stage === liveM.broadcast?.stage
+      ) {
+        return prev; // Pas de changement significatif
+      }
+      return {
+        ...prev,
+        scoreA: liveM.scoreA,
+        scoreB: liveM.scoreB,
+        timerSecondsLeft: liveM.timerSecondsLeft,
+        timerIsRunning: liveM.timerIsRunning,
+        currentQuestionId: liveM.currentQuestionId ?? prev.currentQuestionId,
+        currentQuestionIndex: liveM.currentQuestionIndex ?? prev.currentQuestionIndex,
+        broadcast: liveM.broadcast ?? prev.broadcast,
+        // currentQuestion sera rechargé via loadMatchDetails si questionId change
+      };
+    });
+  }, [liveState, matchDetails]);
 
   // --- Actions ---------------------------------------------------------------
   const runAction = useCallback(

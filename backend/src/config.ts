@@ -31,16 +31,16 @@ export const CONFIG = {
   // Durée pendant laquelle une session vérifiée reste en cache mémoire.
   //
   // Le cache n'est pas une optimisation de performances : c'est ce qui évite
-  // une lecture de la table `sessions` sur CHAQUE requête authentifiée. À 30 s,
+  // une lecture de la table `sessions` sur CHAQUE requête authentifiée. À 5 s,
   // la réouverture de session après un déploiement ne coûte qu'un aller-retour
-  // par utilisateur et par demi-minute, et le risque de servir un droit
-  // révoqué depuis plus de 30 s reste celui que la revalidation en base
+  // par utilisateur et par 5 secondes, et le risque de servir un droit
+  // révoqué depuis plus de 5 s reste celui que la revalidation en base
   // accepte déjà (elle relit `users` à chaque requête).
   //
   // ⚠ Toute révocation doit invalider explicitement le cache : c'est
   //   l'invalidation, et non l'expiration, qui garantit qu'une désactivation
   //   prend effet immédiatement (voir `revokeAllSessionsForUser`).
-  SESSION_CACHE_TTL_MS: 30 * 1000,
+  SESSION_CACHE_TTL_MS: 5 * 1000,
 
   // --- Temps réel ---
   TIMER_LOOP_INTERVAL_MS: 1000,

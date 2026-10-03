@@ -1,7 +1,7 @@
 import { Router, type Response } from 'express';
 import { db } from '../db/index.ts';
 import { participants } from '../db/schema.ts';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { requireAuth, requireAdmin, requireJuryOrAdmin, type AuthRequest } from '../middleware/auth.ts';
 import { logAudit } from '../server/matchEngine.ts';
 import { isForeignKeyViolation, FK_DELETE_MESSAGES } from '../lib/dbErrors.ts';
@@ -21,25 +21,45 @@ validateIds(participantsRouter);
 // Données personnelles de participants (date de naissance, téléphone, email,
 // photo) : lection et pour des mineurs. Accès restreint au staff connecté —
 // cette route était ouverte à tous, sans aucun jeton.
-participantsRouter.get('/', requireAuth, requireJuryOrAdmin, async (_req: AuthRequest, res: Response) => {
+// Pagination : ?page=1&limit=50 (défaut 50, max 200)
+participantsRouter.get('/', requireAuth, requireJuryOrAdmin, async (req: AuthRequest, res: Response) => {
   try {
-    const list = await db
-      .select({
-        id: participants.id,
-        firstName: participants.firstName,
-        lastName: participants.lastName,
-        gender: participants.gender,
-        dateOfBirth: participants.dateOfBirth,
-        phone: participants.phone,
-        email: participants.email,
-        photo: participants.photo,
-        active: participants.active,
-        createdAt: participants.createdAt,
-      })
-      .from(participants)
-      .orderBy(participants.lastName, participants.firstName);
+    const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit as string, 10) || 50));
+    const offset = (page - 1) * limit;
 
-    res.json(list);
+    const [list, [{ total }]] = await Promise.all([
+      db
+        .select({
+          id: participants.id,
+          firstName: participants.firstName,
+          lastName: participants.lastName,
+          gender: participants.gender,
+          dateOfBirth: participants.dateOfBirth,
+          phone: participants.phone,
+          email: participants.email,
+          photo: participants.photo,
+          active: participants.active,
+          createdAt: participants.createdAt,
+        })
+        .from(participants)
+        .orderBy(participants.lastName, participants.firstName)
+        .limit(limit)
+        .offset(offset),
+      db
+        .select({ total: sql<number>`count(*)::int` })
+        .from(participants),
+    ]);
+
+    res.json({
+      data: list,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    });
   } catch (error: any) {
     res.status(500).json({ error: 'Impossible de charger les participants' });
   }

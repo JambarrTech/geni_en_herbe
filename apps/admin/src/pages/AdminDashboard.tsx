@@ -199,6 +199,9 @@ export const AdminDashboard: React.FC = () => {
    * `else`, qui faisait qu'un 401 de session expirée laissait des tableaux
    * vides sans aucun message. Chaque collection est traitée indépendamment
    * pour qu'une erreur isolée n'efface pas tout l'écran.
+   *
+   * Certaines routes renvoient maintenant une pagination : { data: T[], pagination: {...} }.
+   * On extrait `data` si présent, sinon on suppose un tableau direct (rétrocompat).
    */
   const fetchData = useCallback(
     async (signal?: AbortSignal) => {
@@ -209,7 +212,13 @@ export const AdminDashboard: React.FC = () => {
         opts: { public?: boolean } = {}
       ): Promise<string | null> => {
         try {
-          const data = await api.get<T>(path, { signal, ...(opts.public ? { token: null } : {}) });
+          const response = await api.get<{ data: T; pagination?: unknown } | T>(path, {
+            signal,
+            ...(opts.public ? { token: null } : {}),
+          });
+          // Détecte le format paginé : objet avec propriété `data` qui est un tableau
+          const payload = (response as { data?: T; pagination?: unknown });
+          const data = Array.isArray(payload?.data) ? payload.data : (response as T);
           apply(data);
           return null;
         } catch (e) {

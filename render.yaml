@@ -98,7 +98,7 @@ services:
     # ferait échouer le déploiement pour une panne dont Render n'est pas
     # responsable. La base est vérifiée par l'API elle-même au démarrage
     # (`checkDatabaseOnce`), qui journalise une erreur explicite.
-    healthCheckPath: /__static_health
+    healthCheckPath: /health
 
     # `PORT` est injecté par Render et vaut généralement 10000. Le superviseur
     # le transmet à `static` comme `STATIC_PORT`, et le SUPPRIME pour `api`,

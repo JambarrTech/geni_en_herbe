@@ -1,21 +1,41 @@
 import { Router, type Response } from 'express';
 import { db } from '../db/index.ts';
 import { auditLogs, competitionSettings } from '../db/schema.ts';
-import { desc } from 'drizzle-orm';
+import { desc, sql } from 'drizzle-orm';
 import { requireAuth, requireAdmin, requireJuryOrAdmin, type AuthRequest } from '../middleware/auth.ts';
 import { logAudit } from '../server/matchEngine.ts';
 import { adminWriteLimit } from '../middleware/rateLimit.ts';
 
 export const adminRouter = Router();
 
-adminRouter.get('/api/audit-logs', requireAuth, requireAdmin, async (_req: AuthRequest, res: Response) => {
+// Journal d'audit — pagination : ?page=1&limit=50 (défaut 50, max 200)
+adminRouter.get('/api/audit-logs', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
-    const logs = await db
-      .select()
-      .from(auditLogs)
-      .orderBy(desc(auditLogs.id))
-      .limit(100);
-    res.json(logs);
+    const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit as string, 10) || 50));
+    const offset = (page - 1) * limit;
+
+    const [logs, [{ total }]] = await Promise.all([
+      db
+        .select()
+        .from(auditLogs)
+        .orderBy(desc(auditLogs.id))
+        .limit(limit)
+        .offset(offset),
+      db
+        .select({ total: sql<number>`count(*)::int` })
+        .from(auditLogs),
+    ]);
+
+    res.json({
+      data: logs,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    });
   } catch (error: any) {
     res.status(500).json({ error: 'Impossible de charger le journal d\'audit' });
   }

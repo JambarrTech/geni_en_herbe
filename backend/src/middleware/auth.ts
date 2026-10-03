@@ -108,7 +108,6 @@ export async function loadActiveUserById(id: number): Promise<AuthenticatedUser 
   const [row] = await db
     .select({
       id: users.id,
-      uid: users.uid,
       name: users.name,
       email: users.email,
       role: users.role,
@@ -120,7 +119,7 @@ export async function loadActiveUserById(id: number): Promise<AuthenticatedUser 
   if (!row || !row.active) return null;
   return {
     id: row.id,
-    uid: row.uid,
+    uid: '', // Legacy Firebase UID - plus utilisé
     name: row.name,
     email: row.email,
     role: row.role as UserRole,

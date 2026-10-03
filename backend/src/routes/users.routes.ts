@@ -1,5 +1,4 @@
 import { Router, type Response } from 'express';
-import { randomUUID } from 'crypto';
 import { db } from '../db/index.ts';
 import { users } from '../db/schema.ts';
 import { eq, and, desc } from 'drizzle-orm';
@@ -24,7 +23,6 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // Projection minimale : jamais de password_hash chargé hors vérification de connexion.
 const USER_PUBLIC_COLUMNS = {
   id: users.id,
-  uid: users.uid,
   name: users.name,
   email: users.email,
   role: users.role,
@@ -80,7 +78,6 @@ usersRouter.post('/', requireAuth, requireAdmin, adminWriteLimit, async (req: Au
     const [newUser] = await db
       .insert(users)
       .values({
-        uid: `local_${randomUUID()}`,
         name: name.trim(),
         email: normalizedEmail,
         role: role || 'JURY',
@@ -93,7 +90,7 @@ usersRouter.post('/', requireAuth, requireAdmin, adminWriteLimit, async (req: Au
       .returning();
 
     await logAudit(
-      req.user?.uid,
+      req.user?.id.toString(),
       req.user?.email,
       'CREATE_USER',
       'user',
@@ -103,7 +100,6 @@ usersRouter.post('/', requireAuth, requireAdmin, adminWriteLimit, async (req: Au
 
     res.status(201).json({
       id: newUser.id,
-      uid: newUser.uid,
       name: newUser.name,
       email: newUser.email,
       role: newUser.role,
@@ -164,7 +160,7 @@ usersRouter.patch('/:id', requireAuth, requireAdmin, adminWriteLimit, async (req
     }
 
     await logAudit(
-      req.user?.uid,
+      req.user?.id.toString(),
       req.user?.email,
       'UPDATE_USER',
       'user',
@@ -174,7 +170,6 @@ usersRouter.patch('/:id', requireAuth, requireAdmin, adminWriteLimit, async (req
 
     res.json({
       id: updated.id,
-      uid: updated.uid,
       name: updated.name,
       email: updated.email,
       role: updated.role,
@@ -204,7 +199,7 @@ usersRouter.post('/:id/password', requireAuth, requireAdmin, adminWriteLimit, as
     if (!updated) return res.status(404).json({ error: 'Compte non trouvé' });
 
     await logAudit(
-      req.user?.uid,
+      req.user?.id.toString(),
       req.user?.email,
       'RESET_USER_PASSWORD',
       'user',
@@ -244,7 +239,7 @@ usersRouter.delete('/:id', requireAuth, requireAdmin, adminWriteLimit, async (re
     await revokeAllSessionsForUser(id);
 
     await logAudit(
-      req.user?.uid,
+      req.user?.id.toString(),
       req.user?.email,
       'DELETE_USER',
       'user',

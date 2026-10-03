@@ -132,7 +132,7 @@ authRouter.post('/login', async (req: Request, res: Response) => {
 
     const userProfile = {
       id: user.id,
-      uid: user.uid,
+      uid: '', // Legacy Firebase UID - plus utilisé
       name: user.name,
       email: user.email,
       role: user.role as 'ADMIN' | 'JURY',
@@ -147,7 +147,7 @@ authRouter.post('/login', async (req: Request, res: Response) => {
     });
 
     await logAudit(
-      user.uid,
+      user.id.toString(), // Legacy: utilisait user.uid (Firebase)
       user.email,
       'LOGIN',
       'user',
