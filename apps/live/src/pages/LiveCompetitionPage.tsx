@@ -318,7 +318,7 @@ export const LiveCompetitionPage: React.FC = () => {
                 description="Les résultats officiels sont publiés mais aucune équipe n'est encore classée."
               />
             ) : (
-              <div className="mx-auto flex max-w-5xl flex-col items-stretch justify-center gap-6 pt-8 md:flex-row md:items-end lg:max-w-6xl lg:gap-8">
+              <div className="mx-auto flex w-full max-w-5xl flex-col items-center justify-center gap-6 pt-8 md:flex-row md:items-end lg:max-w-6xl lg:gap-8">
                 <PodiumCard
                   rank={2}
                   team={rankings[1]}
