@@ -18,3 +18,45 @@ export const FK_DELETE_MESSAGES: Record<string, string> = {
   teamMember: 'Impossible de retirer ce membre de l\'équipe.',
   user: 'Impossible de supprimer : ce compte est lié à des éléments (jury, etc.).',
 };
+
+/**
+ * Colonne ou table absente de la base (`undefined_column` / `undefined_table`).
+ *
+ * 42703 est le code que PostgreSQL renvoie quand une requête — ou son
+ * `RETURNING` — cite une colonne que la base ne connaît pas. C'est donc
+ * exactement ce que produit une migration non appliquée : le code attend une
+ * colonne, la base ne l'a jamais vue.
+ *
+ * CE N'EST PAS une donnée invalide, et surtout pas une panne : la base
+ * fonctionne parfaitement, c'est le schéma qui est en retard d'un cran sur le
+ * code déployé. Le confondre avec une erreur de saisie fait perdre un temps
+ * considerable à quelqu'un qui cherche du mauvais côté — un identifiant
+ * d'équipe, une valeur de phase — alors que le correctif est une seule commande.
+ */
+export function isMissingSchemaError(err: any): boolean {
+  // Les deux codes sont testés INDÉPENDAMMENT, comme dans
+  // `isForeignKeyViolation` : pg peut envelopper l'erreur sous `cause`, et
+  // `err.code || err.cause.code` ne retiendrait alors que le code extérieur —
+  // typiquement `ECONNREFUSED`, qui parle du réseau et non du schéma, et ferait
+  // passer à côté du vrai diagnostic.
+  return (
+    err?.code === '42703' ||
+    err?.cause?.code === '42703' ||
+    err?.code === '42P01' ||
+    err?.cause?.code === '42P01'
+  );
+}
+
+/**
+ * Message à renvoyer quand le schéma est en retard sur le code.
+ *
+ * Volontairement actionnel : il nomme la commande, parce que l'appelant de l'API
+ * est un humain devant un écran en plein concours, et qu'un diagnostic qu'il
+ * faut aller chercher dans les journaux du serveur ne lui sert à rien.
+ */
+export function missingSchemaMessage(): string {
+  return (
+    'Base de données non à jour : une migration n\'a pas été appliquée. ' +
+    'Exécutez `npm run db:migrate -w backend` sur l\'environnement déployé.'
+  );
+}

@@ -24,6 +24,7 @@ import { scoreLimit, controlLimit, adminWriteLimit } from '../middleware/rateLim
 import { CONFIG, FLOW } from '../config.ts';
 import { validateIds } from '../lib/validate.ts';
 import { createLogger } from '../lib/logger.ts';
+import { isMissingSchemaError, missingSchemaMessage } from '../lib/dbErrors.ts';
 import { buildMatchList, parseOptions, winnerTeamIdOf } from '../lib/matchList.ts';
 import {
   BROADCAST_STAGE,
@@ -274,6 +275,14 @@ matchesRouter.post('/', requireAuth, requireAdmin, adminWriteLimit, async (req: 
     await logAudit(req.user?.uid, req.user?.email, 'CREATE_MATCH', 'match', String(newMatch.id));
     res.status(201).json(newMatch);
   } catch (error: any) {
+    // Une colonne absente n'est pas une erreur de saisie : c'est un schéma en
+    // retard. Le dire ici évite qu'un administrateur cherche un numéro de match
+    // ou une équipe fautifs pendant que la vraie cause — une migration non
+    // appliquée — reste invisible. Voir `lib/dbErrors.ts`.
+    if (isMissingSchemaError(error)) {
+      log.error('Schema incomplet : creation de match impossible', { err: error });
+      return res.status(503).json({ error: missingSchemaMessage() });
+    }
     res.status(500).json({ error: 'Erreur lors de la création du match' });
   }
 });
@@ -1158,6 +1167,9 @@ matchesRouter.post('/:id/broadcast-step', requireAuth, requireJuryOrAdmin, contr
     res.json({ ...updated, broadcast: target });
   } catch (error: any) {
     log.error('Erreur pilotage diffusion', { err: error });
+    if (isMissingSchemaError(error)) {
+      return res.status(503).json({ error: missingSchemaMessage() });
+    }
     res.status(500).json({ error: 'Erreur lors du pilotage de la diffusion' });
   }
 });

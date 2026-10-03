@@ -30,6 +30,34 @@ async function checkDatabaseOnce() {
     const reason = err?.cause?.code || err?.code || (err instanceof Error ? err.message : String(err));
     log.error('ATTENTION — base de donnees injoignable', { raison: reason });
     metrics.dbErrors.inc({ operation: 'healthcheck' });
+    return;
+  }
+
+  // Connexion établie, mais la base peut être en retard sur le code déployé.
+  //
+  // Ce second contrôle est celui qui compte pour un concours : une migration non
+  // appliquée ne coupe rien à la connexion, et ne se révèle qu'à l'usage, par un
+  // 500 sans cause apparente — au milieu d'une rencontre. Le dire ici, au
+  // démarrage, transforme un incident en zouli prévisible.
+  //
+  // Il ne fait PAS arrêter le processus : la base reste utilisable pour tout ce
+  // qui ne touche pas aux colonnes manquantes, et refuser de démarrer
+  // échangerait une dégradation partielle contre une indisponibilité totale.
+  try {
+    const { findMissingColumns, describeMissingColumns } = await import('./lib/schemaCheck.ts');
+    const manquantes = await findMissingColumns();
+    const diagnostic = describeMissingColumns(manquantes);
+    if (diagnostic) {
+      log.error('ATTENTION — schema de base incomplet', { diagnostic, manquantes });
+    } else {
+      log.info('Schema de base : a jour');
+    }
+  } catch (err: any) {
+    // Un échec du contrôle ne doit pas être confondu avec un schéma cassé : on
+    // n'affirme ni l'un ni l'autre.
+    log.warn('Verification du schema impossible', {
+      raison: err?.cause?.code || err?.code || (err instanceof Error ? err.message : String(err)),
+    });
   }
 }
 
