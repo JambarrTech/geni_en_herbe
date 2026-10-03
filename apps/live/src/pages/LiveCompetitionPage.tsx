@@ -231,7 +231,7 @@ export const LiveCompetitionPage: React.FC = () => {
       {/* ---------- En-tête ---------- */}
       <header className="relative z-10 flex items-center justify-between gap-3 border-b border-white/10 pb-4">
         <div className="flex min-w-0 items-center gap-3">
-          <AeerksLogo size={36} priority decorative />
+          <AeerksLogo size={36} priority decorative onDark />
           <div className="min-w-0">
             <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-blue-300">
               AEERKS
