@@ -90,7 +90,7 @@ export function describeMissingColumns(
   return (
     `Base de données en retard sur le code : ${missing.length} ` +
     `${pluriel ? 'colonnes' : 'colonne'} manquante${pluriel ? 's' : ''} — ${liste}. ` +
-    'Aucune donnée n\'est en cause. Exécutez `npm run db:migrate -w backend` ' +
-    'sur l\'environnement déployé, puis redémarrez.'
+    'Aucune donnée n\'est en cause. Depuis le dossier backend/, exécutez ' +
+    '`npm run db:migrate`, puis redémarrez.'
   );
 }

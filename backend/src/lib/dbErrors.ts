@@ -53,10 +53,15 @@ export function isMissingSchemaError(err: any): boolean {
  * Volontairement actionnel : il nomme la commande, parce que l'appelant de l'API
  * est un humain devant un écran en plein concours, et qu'un diagnostic qu'il
  * faut aller chercher dans les journaux du serveur ne lui sert à rien.
+ *
+ * La commande se lance depuis `backend/`, où vit `drizzle.config.ts` et
+ * `drizzle-kit`. Le drapeau `-w backend` qui ferait croire le contraire est
+ * invalide ici : les workspaces de ce dépôt ne couvrent que `apps/*`, `backend`
+ * en est absent, et npm répond « No workspaces found ».
  */
 export function missingSchemaMessage(): string {
   return (
     'Base de données non à jour : une migration n\'a pas été appliquée. ' +
-    'Exécutez `npm run db:migrate -w backend` sur l\'environnement déployé.'
+    'Depuis le dossier backend/, exécutez `npm run db:migrate`.'
   );
 }

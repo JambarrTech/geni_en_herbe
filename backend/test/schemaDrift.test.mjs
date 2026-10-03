@@ -60,10 +60,19 @@ describe('isMissingSchemaError', () => {
 });
 
 describe('missingSchemaMessage', () => {
-  test('nomme la commande à exécuter', () => {
-    // Sans la commande, l'utilisateur transmit l'erreur à un collègue sans piste
-    // pour agir. Le message est la moitié du correctif.
-    assert.match(missingSchemaMessage(), /db:migrate/);
+  test('nomme la commande, et la lance depuis le bon dossier', () => {
+    // La commande doit être COPIABLE telle quelle. `-w backend` est invalide ici :
+    // les workspaces du dépôt ne couvrent que `apps/*`, donc npm répond « No
+    // workspaces found » — un message d'erreur qui propose une commande refusée
+    // est pire que pas de message du tout. Et `drizzle-kit` est installé dans
+    // `backend/node_modules`, pas à la racine : la commande se lance de là.
+    assert.match(missingSchemaMessage(), /npm run db:migrate`/);
+    assert.match(missingSchemaMessage(), /dossier backend\//);
+    assert.equal(
+      /-w backend|--workspace[= ]backend/.test(missingSchemaMessage()),
+      false,
+      'le message ne doit pas proposer un workspace inexistant'
+    );
   });
 
   test('distingue le schéma d\'une erreur de saisie', () => {
@@ -102,7 +111,6 @@ describe('describeMissingColumns', () => {
 
   test('conserve la commande de correction dans tous les cas', () => {
     const cas = [
-      [],
       [{ table: 'matches', column: 'broadcast_stage', since: '0004_broadcast_stage' }],
       [
         { table: 'a', column: 'b', since: '1' },
@@ -110,8 +118,7 @@ describe('describeMissingColumns', () => {
       ],
     ];
     for (const manquant of cas) {
-      if (manquant.length === 0) continue;
-      assert.match(describeMissingColumns(manquant), /db:migrate/);
+      assert.match(describeMissingColumns(manquant), /npm run db:migrate/);
     }
   });
 });
