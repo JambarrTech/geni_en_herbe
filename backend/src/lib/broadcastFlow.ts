@@ -223,3 +223,85 @@ export function stageIsPerQuestion(stage: BroadcastStage): boolean {
 export function stageIsPerMatch(stage: BroadcastStage): boolean {
   return stage === BROADCAST_STAGE.ROSTER || stage === BROADCAST_STAGE.FINAL;
 }
+
+/** Action demandée par le jury sur la diffusion. */
+export type BroadcastAction = 'next' | 'previous' | 'restart';
+
+/** Ce que le franchissement d'une étape fait au chronomètre. */
+export interface TimerStepInput {
+  action: BroadcastAction;
+  /** Étape vers laquelle on va. */
+  targetStage: BroadcastStage;
+  /** L'index de question change-t-il ? */
+  questionChanged: boolean;
+  /** La question visée n'a-t-elle jamais été jouée ? */
+  neverPlayed: boolean;
+  /** `timer_seconds_left` avant le franchissement. */
+  previousSeconds: number;
+  /** `timer_duration` avant le franchissement. */
+  previousDuration: number;
+}
+
+/** Colonnes `timer_*` qu'un franchissement d'étape peut avoir à réécrire. */
+export type TimerStepUpdate = {
+  timerSecondsLeft: number;
+  timerDuration: number;
+  timerStartedAt: Date | null;
+  timerIsRunning: boolean;
+};
+
+/**
+ * Colonnes `timer_*` à écrire, ou `null` si le chronomètre doit être laissé tel
+ * quel.
+ *
+ * LE CHRONOMÈTRE SE PILOTE PAR LE SCÉNARIO, PAS PAR L'ÉCRAN
+ * -------------------------------------------------------
+ * Le décompte est autoritaire et vit dans le serveur (`timerLoopTick` dans
+ * `server/matchEngine.ts`), qui recalcule `timer_duration - (maintenant -
+ * timer_started_at)` à chaque seconde. Il ne s'arrête donc pas parce que
+ * l'écran public affiche autre chose : tant que `timer_started_at` est posé, il
+ * décompte.
+ *
+ * Il en découle que le moment où le chrono part doit être celui où le public voit
+ * la question — pas celui où la machine a démarré. Et le lancement du match ouvre
+ * sur l'effectif des équipes : un chrono armé à cet instant se consume pendant la
+ * présentation, et il est à zéro avant que la question 1 ne soit lue.
+ *
+ * D'où les deux décisions ci-dessous.
+ *
+ * 1. Le chrono s'arme sur l'ÉTAPE `QUESTION`, pas sur un changement d'index. Le
+ *    passage `ROSTER` → `QUESTION` porte sur la question 0, donc sur le même
+ *    index qu'au lancement, et `questionChanged` y vaut `false` : conditionner
+ *    l'armement à `questionChanged` laissait le chrono filer pendant toute la
+ *    présentation des équipes. Le symptôme n'était visible d'aucune façon — pas
+ *    d'erreur, pas de journal : un compteur simplement trop bas.
+ *
+ * 2. Reculer ne réarme jamais. Le jury a pu arrêter le chrono à dessein ; le
+ *    faire repartir sous les yeux du public parce qu'il a corrigé un cran de
+ *    trop serait bien pire que le décalage qu'il cherche à réparer.
+ *
+ * Quand le chrono n'est pas armé mais que la question change, il se FIGE au lieu
+ * de continuer à tourner sur une question abandonnée : c'est le cas du recul sur
+ * une question fraîche, où repartir serait faux et continuer à décompter plus
+ * faux encore.
+ */
+export function timerUpdateForStep(
+  input: TimerStepInput,
+  questionDuration: number
+): TimerStepUpdate | null {
+  const armTimer =
+    input.action !== 'previous' &&
+    input.targetStage === BROADCAST_STAGE.QUESTION &&
+    input.neverPlayed;
+
+  // Rien à écrire si on n'arme pas et que la question ne bouge pas : les étapes
+  // de réponse et de révélation laissent le chrono exactement où le jury l'a mis.
+  if (!armTimer && !input.questionChanged) return null;
+
+  return {
+    timerSecondsLeft: armTimer ? questionDuration : input.previousSeconds,
+    timerDuration: armTimer ? questionDuration : input.previousDuration,
+    timerStartedAt: armTimer ? new Date() : null,
+    timerIsRunning: armTimer,
+  };
+}

@@ -32,6 +32,7 @@ import {
   nextCursor,
   normalizeCursor,
   previousCursor,
+  timerUpdateForStep,
   type BroadcastCursor,
 } from '../lib/broadcastFlow.ts';
 
@@ -355,8 +356,21 @@ matchesRouter.post('/:id/start', requireAuth, requireJuryOrAdmin, controlLimit, 
         broadcastStage: match.startedAt ? match.broadcastStage : BROADCAST_STAGE.ROSTER,
         timerSecondsLeft: duration,
         timerDuration: duration,
-        timerIsRunning: true,
-        timerStartedAt: new Date(),
+        // Le chrono est AMORCÉ, pas lancé.
+        //
+        // Le compteur est autoritaire et vit dans le serveur (`timerLoopTick`),
+        // qui recalcule `timerDuration - (maintenant - timerStartedAt)`. Il ne
+        // s'arrête donc pas parce que l'écran public affiche autre chose : il
+        // décompte en continu tant que `timerStartedAt` est posé.
+        //
+        // Or le lancement ouvre sur l'effectif des équipes. Lance ici, le chrono
+        // brûle toute la présentation des équipes et peut être à zéro avant même
+        // que la question 1 soit lue — sur une question de 60 s avec une
+        // présentation de 90 s, c'est un match perdu. Il part donc à l'entrée de
+        // l'étape QUESTION, c'est-à-dire quand le jury décide que le public voit
+        // la question. `next-question` l'arme aussi, pour qui pilote à l'ancienne.
+        timerIsRunning: false,
+        timerStartedAt: null,
         updatedAt: new Date(),
       })
       .where(eq(matches.id, id))
@@ -1040,12 +1054,13 @@ matchesRouter.post('/:id/adjust-score', requireAuth, requireJuryOrAdmin, scoreLi
  *  - `restart`  : retour à l'effectif des équipes, au cas où le jury présente le
  *                 match depuis le début.
  *
- * Question et chronomètre : quand le curseur change de question, la question
- * courante et le chrono suivent, exactement comme le fait `next-question`. Le
- * chrono ne fait QUE démarrer sur une question encore fraîche (jamais résolue) ;
- * sur les étapes de réponse et de révélation il garde l'état que le jury lui a
- * donné avec ses propres commandes. Le scénario ne prend donc pas le chrono
- * des mains du jury au milieu d'une question.
+ * Question et chronomètre : le chrono démarre à l'entrée de l'étape QUESTION
+ * d'une question jamais jouée, et seulement dans le sens « avant ». Il ne part
+ * donc pas au lancement du match — lequel ouvre sur l'effectif des équipes et
+ * arme un chrono au repos (cf. `/:id/start`) — mais au moment où le public voit
+ * réellement la question. Sur les étapes de réponse et de révélation il garde
+ * l'état que le jury lui a donné avec ses propres commandes : le scénario ne
+ * prend pas le chrono des mains du jury au milieu d'une question.
  */
 matchesRouter.post('/:id/broadcast-step', requireAuth, requireJuryOrAdmin, controlLimit, async (req: AuthRequest, res: Response) => {
   try {
@@ -1106,18 +1121,31 @@ matchesRouter.post('/:id/broadcast-step', requireAuth, requireJuryOrAdmin, contr
       : [null];
 
     // Une question déjà résolue ne doit être ni rouverte ni remise au chrono.
-    // C'est ce qui permet de revenir en arrière pour corriger une diffusion
-    // sans qu'une question déjà jouée reparte à zéro devant le public.
-    const fresh =
-      questionChanged && nextMQ
-        ? nextMQ.status === FLOW.QUESTION_STATUS.PENDING || nextMQ.status === FLOW.QUESTION_STATUS.ACTIVE
-        : false;
+    // On raisonne sur le STATUT de la question, indépendamment de l'index : ce
+    // qui compte est « a-t-elle déjà été jouée », pas « l'index a-t-il bougé ».
+    const neverPlayed =
+      nextMQ?.status === FLOW.QUESTION_STATUS.PENDING ||
+      nextMQ?.status === FLOW.QUESTION_STATUS.ACTIVE;
+    const fresh = questionChanged && neverPlayed;
 
     const duration = nextQ?.timeLimitSeconds || CONFIG.DEFAULT_TIMER_SECONDS;
-    // On ne relance le chrono qu'en ENTRANT sur la question d'une question
-    // fraîche, et seulement dans un sens. Reculer sur une question ne doit pas
-    // faire repartir un décompte que le jury a peut-être arrêté à dessein.
-    const armTimer = fresh && action !== 'previous';
+
+    // La politique du chronomètre est dans `lib/broadcastFlow.ts`, testée : elle
+    // est restée ici une fois, et le défaut qu'elle contenait — chrono décompté
+    // pendant la présentation des équipes — n'aurait été vu par aucun test de
+    // bout en bout, parce qu'il ne produit aucune erreur, seulement un compteur
+    // trop bas.
+    const timerUpdate = timerUpdateForStep(
+      {
+        action,
+        targetStage: target.stage,
+        questionChanged,
+        neverPlayed,
+        previousSeconds: match.timerSecondsLeft,
+        previousDuration: match.timerDuration,
+      },
+      duration
+    );
 
     const [updated] = await db
       .update(matches)
@@ -1127,12 +1155,9 @@ matchesRouter.post('/:id/broadcast-step', requireAuth, requireJuryOrAdmin, contr
           ? {
               currentQuestionIndex: target.questionIndex,
               currentQuestionId: nextMQ?.questionId ?? match.currentQuestionId,
-              timerSecondsLeft: armTimer ? duration : match.timerSecondsLeft,
-              timerDuration: armTimer ? duration : match.timerDuration,
-              timerStartedAt: armTimer ? new Date() : null,
-              timerIsRunning: armTimer,
             }
           : {}),
+        ...(timerUpdate ?? {}),
         updatedAt: new Date(),
       })
       .where(eq(matches.id, id))

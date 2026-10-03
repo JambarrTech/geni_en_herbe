@@ -32,6 +32,7 @@ import {
   previousCursor,
   stageIsPerMatch,
   stageIsPerQuestion,
+  timerUpdateForStep,
 } from '../src/lib/broadcastFlow.ts';
 
 /** Avance le scénario jusqu'à la première occurrence d'une étape. */
@@ -280,5 +281,250 @@ describe('broadcastPosition', () => {
       broadcastPosition(question1, 2).stepNumber - broadcastPosition(question0, 2).stepNumber,
       4
     );
+  });
+});
+describe('timerUpdateForStep — le chrono suit le scenario, pas la machine', () => {
+  const base = {
+    previousSeconds: 60,
+    previousDuration: 60,
+  };
+
+  test('ROSTER -> QUESTION arme le chrono meme quand l index ne change pas', () => {
+    // LE CAS QUI A CAUSE LE DEFAUT.
+    //
+    // Le lancement ouvre sur ROSTER avec l'index 0 ; l'etape suivante est
+    // QUESTION sur le MENE index 0. Donc `questionChanged` est false, et une
+    // regle « on arme quand l index bouge » n'arme jamais a ce moment-la.
+    //
+    // Concretement, le chrono partait au lancement et continuait de tourner
+    // pendant toute la presentation des equipes. Aucun test ne l'aurait vu : le
+    // serveur ne leve rien, il renvoie un match parfaitement valide dont le
+    // compteur est simplement trop bas. Et comme le decompte est autoritaire
+    // cote serveur, la question 1 pouvait etre a zero avant d'etre lue.
+    const update = timerUpdateForStep(
+      {
+        action: 'next',
+        targetStage: BROADCAST_STAGE.QUESTION,
+        questionChanged: false,
+        neverPlayed: true,
+        ...base,
+      },
+      60
+    );
+
+    assert.ok(update, 'le chrono doit etre arme a l entree de la question');
+    assert.equal(update.timerIsRunning, true);
+    // Recharge a la duree de la question, pas a la valeur decroissante en cours.
+    assert.equal(update.timerSecondsLeft, 60);
+    assert.equal(update.timerDuration, 60);
+    assert.ok(update.timerStartedAt instanceof Date);
+  });
+
+  test('la duree de la question prime sur celle du match', () => {
+    // Une question a 30 s dans un match arme a 60 s : c'est la question qui
+    // commande, sinon le jury dispose de temps que personne ne lui a accorde.
+    const update = timerUpdateForStep(
+      {
+        action: 'next',
+        targetStage: BROADCAST_STAGE.QUESTION,
+        questionChanged: false,
+        neverPlayed: true,
+        previousSeconds: 55,
+        previousDuration: 60,
+      },
+      30
+    );
+    assert.equal(update.timerSecondsLeft, 30);
+    assert.equal(update.timerDuration, 30);
+  });
+
+  test('changer de question arme le chrono de la nouvelle', () => {
+    const update = timerUpdateForStep(
+      {
+        action: 'next',
+        targetStage: BROADCAST_STAGE.QUESTION,
+        questionChanged: true,
+        neverPlayed: true,
+        ...base,
+      },
+      45
+    );
+    assert.equal(update.timerIsRunning, true);
+    assert.equal(update.timerSecondsLeft, 45);
+  });
+
+  test('les etapes de reponse et de revelation ne touchent PAS au chrono', () => {
+    // C'est le contrat du scenario : entre l'enonce et la revelation, le chrono
+    // appartient au jury. Le scenario ne doit ni le remettre a zero, ni l'arreter.
+    for (const targetStage of [
+      BROADCAST_STAGE.ANSWER_A,
+      BROADCAST_STAGE.ANSWER_B,
+      BROADCAST_STAGE.REVEAL,
+      BROADCAST_STAGE.FINAL,
+      BROADCAST_STAGE.ROSTER,
+    ]) {
+      const update = timerUpdateForStep(
+        {
+          action: 'next',
+          targetStage,
+          questionChanged: false,
+          neverPlayed: true,
+          ...base,
+        },
+        60
+      );
+      assert.equal(update, null, `${targetStage} ne doit rien ecrire sur le chrono`);
+    }
+  });
+
+  test('reculer ne redemarre JAMAIS un chrono arrete a dessein', () => {
+    // Le jury a arrete le chrono avant de publier une correction ; corriger un
+    // cran de trop ne doit pas le faire repartir devant le public.
+    const update = timerUpdateForStep(
+      {
+        action: 'previous',
+        targetStage: BROADCAST_STAGE.QUESTION,
+        questionChanged: false,
+        neverPlayed: true,
+        previousSeconds: 22,
+        previousDuration: 60,
+      },
+      60
+    );
+    assert.equal(update, null, 'un recul sur la meme question ne touche a rien');
+  });
+
+  test('reculer sur une question jamais jouee FIGE le chrono', () => {
+    // Le cas oppose a l armement : repartir serait faux, mais laisser tourner
+    // sur une question que le jury vient d'abandonner serait pire. On fige.
+    const update = timerUpdateForStep(
+      {
+        action: 'previous',
+        targetStage: BROADCAST_STAGE.QUESTION,
+        questionChanged: true,
+        neverPlayed: true,
+        previousSeconds: 22,
+        previousDuration: 60,
+      },
+      60
+    );
+    assert.ok(update);
+    assert.equal(update.timerIsRunning, false);
+    assert.equal(update.timerStartedAt, null);
+    // Le temps restant est conserve : le jury peut repartir d'ou il s'etait arrete.
+    assert.equal(update.timerSecondsLeft, 22);
+    assert.equal(update.timerDuration, 60);
+  });
+
+  test('une question deja jouee n est jamais remise au chrono', () => {
+    // Revenir sur une question resolue pour corriger la diffusion ne doit pas la
+    // rejouer : le public verrait le compteur repartir a zero sur une question
+    // qui a deja ete notee.
+    const update = timerUpdateForStep(
+      {
+        action: 'next',
+        targetStage: BROADCAST_STAGE.QUESTION,
+        questionChanged: true,
+        neverPlayed: false,
+        previousSeconds: 12,
+        previousDuration: 60,
+      },
+      60
+    );
+    assert.ok(update);
+    assert.equal(update.timerIsRunning, false);
+    assert.equal(update.timerStartedAt, null);
+    assert.equal(update.timerSecondsLeft, 12, 'le temps restant doit etre conserve');
+  });
+
+  test('restart ne remet pas le chrono a zero', () => {
+    // Un retour a l effectif des equipes est une correction de mise en scene,
+    // pas un re-decompte : le jury peut relancer l effectif apres avoir arrete
+    // le chrono, et il s attend a le retrouver.
+    const update = timerUpdateForStep(
+      {
+        action: 'restart',
+        targetStage: BROADCAST_STAGE.ROSTER,
+        questionChanged: true,
+        neverPlayed: false,
+        previousSeconds: 41,
+        previousDuration: 60,
+      },
+      60
+    );
+    assert.ok(update);
+    assert.equal(update.timerIsRunning, false);
+    assert.equal(update.timerSecondsLeft, 41);
+  });
+
+  test('une serie deja resolue en entier ne peut pas redemarrer le chrono', () => {
+    // Cas limite, mais celui du jury qui reprend un match deja joue : aucune
+    // etape QUESTION ne doit remettre le compteur a zero.
+    for (const neverPlayed of [false, true]) {
+      const update = timerUpdateForStep(
+        {
+          action: 'next',
+          targetStage: BROADCAST_STAGE.QUESTION,
+          questionChanged: true,
+          neverPlayed,
+          previousSeconds: 0,
+          previousDuration: 60,
+        },
+        60
+      );
+      if (neverPlayed) {
+        assert.equal(update.timerIsRunning, true);
+      } else {
+        assert.equal(update.timerIsRunning, false);
+      }
+    }
+  });
+
+  test('chaque etape du scenario laisse le chrono intact sauf QUESTION', () => {
+    // Propriete globale, ecrite sur la sequence ENTIERE : a aucun moment de la
+    // diffusion le chrono ne peut s arreter ou repartir autrement qu'en entrant
+    // sur l enonce d'une question. C'est ce qui garantit que le jury garde la
+    // main pendant les reponses.
+    //
+    // Le parcours est strictement AVANT. Sur un parcours avant, chaque passage
+    // sur QUESTION est une premiere venue : la question n'a pas pu etre notee
+    // avant qu'on n'y arrive. `neverPlayed` vaut donc toujours vrai, et c'est
+    // ce qui doit suffire a armer le chrono.
+    const QUESTION_COUNT = 3;
+    let cursor = firstCursor();
+    let seconds = 60;
+
+    for (let guard = 0; guard < 100; guard += 1) {
+      const next = nextCursor(cursor, QUESTION_COUNT);
+      if (!next) break;
+
+      // Le jury baisse le chrono entre deux etapes : l'ecran suivant doit le
+      // respecter tel quel.
+      seconds -= 7;
+      const update = timerUpdateForStep(
+        {
+          action: 'next',
+          targetStage: next.stage,
+          questionChanged: next.questionIndex !== cursor.questionIndex,
+          neverPlayed: true,
+          previousSeconds: seconds,
+          previousDuration: 60,
+        },
+        60
+      );
+
+      if (next.stage === BROADCAST_STAGE.QUESTION) {
+        assert.ok(update, 'QUESTION arme toujours le chrono');
+        assert.equal(update.timerSecondsLeft, 60);
+        // Le compteur repart de la duree de la question : sans cette
+        // synchronisation, la simulation ci-dessous deriverait de la valeur
+        // qu'elle a elle-meme posee, et le test passerait sur un chrono
+        // parfaitement incoherent.
+        seconds = update.timerSecondsLeft;
+      } else {
+        assert.equal(update, null, `${next.stage} ne touche pas au chrono`);
+      }
+      cursor = next;
+    }
   });
 });
