@@ -166,11 +166,11 @@ export const LiveCompetitionPage: React.FC = () => {
     return (
       <div
         className={[
-          'relative flex min-h-[18rem] flex-col items-center justify-between rounded-2xl border p-7 text-center sm:min-h-[20rem] sm:p-8 lg:min-h-[22rem]',
+          'relative flex min-h-[18rem] w-full max-w-sm flex-col items-center justify-between rounded-2xl border p-7 text-center sm:min-h-[20rem] sm:p-8 lg:min-h-[22rem]',
           winner
             ? 'border-amber-400/50 bg-amber-400/10'
             : 'border-white/12 bg-slate-900/40',
-          rank === 2 ? 'order-1 md:order-1' : rank === 1 ? 'order-2 md:order-2' : 'order-3',
+          rank === 2 ? 'order-1 md:order-1 md:self-end' : rank === 1 ? 'order-2 md:order-2 md:z-10 md:-mb-2' : 'order-3 md:order-3 md:self-end',
         ].join(' ')}
       >
         {winner && (
@@ -318,7 +318,7 @@ export const LiveCompetitionPage: React.FC = () => {
                 description="Les résultats officiels sont publiés mais aucune équipe n'est encore classée."
               />
             ) : (
-              <div className="mx-auto grid max-w-5xl grid-cols-1 items-stretch gap-6 pt-8 md:grid-cols-3 lg:max-w-6xl lg:gap-8">
+              <div className="mx-auto flex max-w-5xl flex-col items-stretch justify-center gap-6 pt-8 md:flex-row md:items-end lg:max-w-6xl lg:gap-8">
                 <PodiumCard
                   rank={2}
                   team={rankings[1]}
