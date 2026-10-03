@@ -228,27 +228,30 @@ export const LiveCompetitionPage: React.FC = () => {
         className="pointer-events-none absolute inset-0 bg-[radial-gradient(70rem_32rem_at_50%_-10rem,rgba(11,59,130,0.35),transparent_70%)]"
       />
 
-      {/* ---------- En-tête ---------- */}
-      <header className="relative z-10 flex items-center justify-between gap-3 border-b border-white/10 pb-4">
+      {/* ---------- En-tête ----------
+          Seule zone claire de la page. Le logo repasse donc en variante
+          claire, et toute l'encre de l'en-tête suit : sans ce changement le
+          `text-blue-300` et le `text-white` disparaîtraient sur le blanc. */}
+      <header className="relative z-10 flex items-center justify-between gap-3 rounded-2xl bg-white px-4 py-3 shadow-sm ring-1 ring-slate-900/5">
         <div className="flex min-w-0 items-center gap-3">
-          <AeerksLogo size={36} priority decorative onDark />
+          <AeerksLogo size={36} priority decorative />
           <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-blue-300">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#0B3B82]">
               AEERKS
             </p>
-            <p className="truncate text-sm font-bold text-white sm:text-base">
+            <p className="truncate text-sm font-bold text-slate-900 sm:text-base">
               Journée d'Excellence
-              <span className="mx-1.5 text-slate-600" aria-hidden="true">
+              <span className="mx-1.5 text-slate-300" aria-hidden="true">
                 —
               </span>
-              <span className="text-blue-300">Génie en Herbe</span>
+              <span className="text-[#0B3B82]">Génie en Herbe</span>
             </p>
           </div>
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
           {(eventName || edition) && (
-            <span className="hidden truncate rounded-full border border-white/12 bg-white/5 px-3 py-1.5 text-xs font-medium text-slate-200 md:inline-block md:max-w-[18rem]">
+            <span className="hidden truncate rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 md:inline-block md:max-w-[18rem]">
               {eventName}
               {eventName && edition ? ' · ' : ''}
               {edition}
@@ -258,7 +261,7 @@ export const LiveCompetitionPage: React.FC = () => {
           <div
             role="status"
             title={connectionLabel}
-            className="flex items-center gap-1.5 rounded-full border border-white/12 bg-white/5 px-2.5 py-1.5"
+            className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1.5"
           >
             <span
               aria-hidden="true"
@@ -269,7 +272,7 @@ export const LiveCompetitionPage: React.FC = () => {
               ].join(' ')}
             />
             <span className="sr-only">{connectionLabel}</span>
-            <span aria-hidden="true" className="text-[11px] font-medium text-slate-200">
+            <span aria-hidden="true" className="text-[11px] font-medium text-slate-700">
               {isConnected ? 'Direct' : 'Hors ligne'}
             </span>
           </div>
@@ -279,7 +282,7 @@ export const LiveCompetitionPage: React.FC = () => {
             onClick={toggleFullscreen}
             title="Passer en plein écran"
             aria-label="Passer en plein écran"
-            className="rounded-lg border border-white/12 bg-white/5 p-1.5 text-slate-200 transition-colors hover:bg-white/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+            className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-600 transition-colors hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
           >
             <Maximize className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
