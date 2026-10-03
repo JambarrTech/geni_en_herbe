@@ -1169,21 +1169,9 @@ matchesRouter.delete('/:id', requireAuth, requireAdmin, adminWriteLimit, async (
       return res.status(400).json({ error: 'Impossible de supprimer un match en cours ou en pause. Terminez-le d\'abord.' });
     }
 
-    // score_events est en ON DELETE CASCADE : supprimer un match effacerait
-    // définitivement son journal de score. Pour une compétition auditée, c'est
-    // inacceptable — on bloque tant qu'il existe des événements.
-    const [existing] = await db
-      .select({ id: scoreEvents.id })
-      .from(scoreEvents)
-      .where(eq(scoreEvents.matchId, id))
-      .limit(1);
-    if (existing) {
-      return res.status(409).json({
-        error:
-          'Impossible de supprimer : ce match possède un historique de score. ' +
-          'Le journal d\'audit doit être conservé. Annulez son résultat pour le retirer du classement.',
-      });
-    }
+    // score_events est en ON DELETE CASCADE : on autorise la suppression
+    // d'un match terminé, y compris avec un historique de score. Le journal
+    // d'audit est effacé avec le match pour permettre la purge demandée.
 
     await db.delete(matches).where(eq(matches.id, id));
     await logAudit(req.user?.uid, req.user?.email, 'DELETE_MATCH', 'match', String(id));
