@@ -166,7 +166,7 @@ export const LiveCompetitionPage: React.FC = () => {
     return (
       <div
         className={[
-          'relative flex flex-col items-center rounded-2xl border p-6 text-center',
+          'relative flex min-h-[18rem] flex-col items-center justify-between rounded-2xl border p-7 text-center sm:min-h-[20rem] sm:p-8 lg:min-h-[22rem]',
           winner
             ? 'border-amber-400/50 bg-amber-400/10'
             : 'border-white/12 bg-slate-900/40',
@@ -174,15 +174,15 @@ export const LiveCompetitionPage: React.FC = () => {
         ].join(' ')}
       >
         {winner && (
-          <span className="absolute -top-3 inline-flex items-center gap-1.5 rounded-full bg-amber-400 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-900">
-            <Sparkles className="h-3 w-3" aria-hidden="true" />
+          <span className="absolute -top-3.5 inline-flex items-center gap-1.5 rounded-full bg-amber-400 px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-slate-900">
+            <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
             Grand vainqueur
           </span>
         )}
         <span
           aria-hidden="true"
           className={[
-            'mb-3 flex h-11 w-11 items-center justify-center rounded-xl text-lg font-bold',
+            'mb-4 flex h-12 w-12 items-center justify-center rounded-xl text-xl font-bold lg:h-14 lg:w-14 lg:text-2xl',
             winner
               ? 'bg-amber-400 text-slate-900'
               : rank === 3
@@ -194,23 +194,23 @@ export const LiveCompetitionPage: React.FC = () => {
         </span>
         <span
           className={[
-            'text-[11px] font-semibold uppercase tracking-[0.14em]',
+            'text-xs font-semibold uppercase tracking-[0.16em]',
             winner ? 'text-amber-300' : 'text-slate-400',
           ].join(' ')}
         >
           {label}
         </span>
-        <h4 className="mt-1 text-lg font-bold text-white text-balance sm:text-xl">
+        <h4 className="mt-1 text-xl font-bold text-white text-balance sm:text-2xl lg:text-3xl">
           {team.teamName}
         </h4>
         <p
           className={[
-            'mt-3 text-2xl font-bold tabular-nums',
+            'mt-4 text-3xl font-bold tabular-nums sm:text-4xl lg:text-5xl',
             winner ? 'text-amber-300' : 'text-white',
           ].join(' ')}
         >
           {score}
-          <span className="ml-1.5 text-sm font-medium text-slate-400">pts</span>
+          <span className="ml-1.5 text-base font-medium text-slate-400">pts</span>
         </p>
       </div>
     );
@@ -318,7 +318,7 @@ export const LiveCompetitionPage: React.FC = () => {
                 description="Les résultats officiels sont publiés mais aucune équipe n'est encore classée."
               />
             ) : (
-              <div className="mx-auto grid max-w-4xl grid-cols-1 items-start gap-5 pt-6 md:grid-cols-3">
+              <div className="mx-auto grid max-w-5xl grid-cols-1 items-stretch gap-6 pt-8 md:grid-cols-3 lg:max-w-6xl lg:gap-8">
                 <PodiumCard
                   rank={2}
                   team={rankings[1]}
