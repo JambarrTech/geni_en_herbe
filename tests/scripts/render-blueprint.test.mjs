@@ -7,8 +7,20 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const require = createRequire(import.meta.url);
+const load = require('js-yaml').load;
+
+/** `render.yaml` réel, trouvé depuis ce fichier et non depuis le cwd. */
+const RENDER_YAML = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'render.yaml');
+
 import {
   auditBlueprint,
+  auditMigrationAuBuild,
   auditOriginsWs,
   auditRoleService,
   compileLeFrontend,
@@ -23,7 +35,8 @@ const BLUEPRINT = {
       type: 'web',
       runtime: 'node',
       plan: 'free',
-      buildCommand: 'npm ci --include=dev && npm run build && npm ci --prefix backend',
+      buildCommand:
+        'npm ci --include=dev && npm run build && npm ci --prefix backend && cd backend && npm run db:migrate',
       startCommand: 'cd backend && npm run start:all',
       healthCheckPath: '/__static_health',
       envVars: [
@@ -146,11 +159,75 @@ test('auditOriginsWs — un seul constat, pour rester avec son sujet', () => {
   );
 });
 
+// --- auditMigrationAuBuild --------------------------------------------------
+
+test('auditMigrationAuBuild — db:migrate après les dépendances : correct', () => {
+  // L'ordre du blueprint réellement déployé.
+  const r = auditMigrationAuBuild(
+    'npm ci --include=dev && npm run build && npm ci --prefix backend && cd backend && npm run db:migrate'
+  );
+  assert.equal(r.level, 'ok');
+});
+
+test('auditMigrationAuBuild — aucune migration : bloquant', () => {
+  // L'état avant le correctif. C'est la configuration qui a coûté deux pannes :
+  // le code déployé lisait une colonne absente, et rien dans le dépôt ne le
+  // interdisait puisque le buildCommand ne parlait pas de migrations.
+  const r = auditMigrationAuBuild('npm ci --include=dev && npm run build && npm ci --prefix backend');
+  assert.equal(r.level, 'ko');
+  assert.match(r.text, /db:migrate/);
+  // Le constat doit rappeler pourquoi, sinon il se lit comme une préférence.
+  assert.match(r.text, /0005_broadcast_roster_until/);
+});
+
+test('auditMigrationAuBuild — db:migrate avant le npm ci du backend : bloquant', () => {
+  // Le script a besoin de drizzle-orm et de tsx. Sans eux il meurt sur un module
+  // introuvable : bruyant, mais trompeur, et le rapport d'échec ne parle pas de
+  // migrations. Détecté avant le déploiement, c'est un message clair.
+  const r = auditMigrationAuBuild(
+    'cd backend && npm run db:migrate && npm ci --prefix backend && npm run build'
+  );
+  assert.equal(r.level, 'ko');
+  assert.match(r.text, /ts[xx]/);
+});
+
+test('auditMigrationAuBuild — un buildCommand absent ne leve pas', () => {
+  // Le cas est réel : `auditBlueprint` signale l'absence du champ, cet audit ne
+  // doit pas remplacer ce constat par une exception.
+  assert.equal(auditMigrationAuBuild(undefined).level, 'ko');
+});
+
+test('auditMigrationAuBuild — ne contrôle ni l\'ordre du build ni --include=dev', () => {
+  // Ce sont des préférences, pas des pannes. db:migrate AVANT `npm run build`
+  // fonctionne parfaitement : le schéma peut être à jour avant même de compiler.
+  const avantBuild = auditMigrationAuBuild(
+    'npm ci --prefix backend && cd backend && npm run db:migrate && npm ci --include=dev && npm run build'
+  );
+  assert.equal(avantBuild.level, 'ok');
+
+  // Et rien dans l'audit ne doit porter de jugement sur la taille de l'image.
+  assert.doesNotMatch(auditMigrationAuBuild(undefined).text, /include=dev/);
+});
+
 // --- auditBlueprint ---------------------------------------------------------
 
 test('auditBlueprint — le blueprint reel est coherent', () => {
   const { findings } = auditBlueprint(BLUEPRINT);
   assert.equal(estIncoherent(findings), false, texte(findings));
+});
+
+test('auditBlueprint — le render.yaml du dépôt est conforme', () => {
+  // BLUEPRINT ci-dessus est une COPIE. Sans ce test, on pourrait corriger la
+  // copie, laisser le vrai fichier intact, et croire le dépôt migré alors que
+  // Render redéployerait sans appliquer les migrations.
+  const yaml = readFileSync(RENDER_YAML, 'utf8');
+  const { findings } = auditBlueprint(load(yaml));
+  assert.equal(estIncoherent(findings), false, texte(findings));
+  assert.match(
+    auditMigrationAuBuild(load(yaml).services[0].buildCommand).text,
+    /Migrations appliquées par le build/,
+    "render.yaml n'applique plus les migrations"
+  );
 });
 
 test('auditBlueprint — services absents : pas de division par zero', () => {

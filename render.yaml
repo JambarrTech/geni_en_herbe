@@ -54,7 +54,31 @@ services:
     # `--include=dev` n'est pas une coquetterie : Render définit
     # `NODE_ENV=production`, ce qui ferait omettre les dépendances de
     # développement — dont `vite`, sans lequel aucune interface ne se compile.
-    buildCommand: npm ci --include=dev && npm run build && npm ci --prefix backend
+    #
+    # LES MIGRATIONS SONT APPLIQUÉES ICI, ET C'EST LE BUT DE LA MANIPULATION.
+    # ==============================================================
+    # Le dernier maillon est `npm run db:migrate`, et il ne dépend d'aucune
+    # `devDependency` : le script `backend/src/db/migrate.ts` utilise
+    # `drizzle-orm/node-postgres/migrator`, et `drizzle-orm` est en
+    # `dependencies`. `drizzle-kit` n'est donc pas nécessaire ici — il ne l'a
+    # jamais été pour l'appliquer, seulement pour le générer.
+    #
+    # Le `--prefix backend` qui précède reste SANS `--include=dev` : `drizzle-kit`
+    # et `typescript` n'ont pas leur place dans l'image de production.
+    #
+    # Conséquence recherchée : si une migration échoue, `npm` rend un code de
+    # sortie non nul, le build échoue, et **le déploiement est annulé**. L'ancienne
+    # version, qui fonctionne, reste en ligne. Il devient impossible de livrer du
+    # code qui lit une colonne absente.
+    #
+    # C'est le remède à deux pannes identiques : `0004_broadcast_stage` puis
+    # `0005_broadcast_roster_until` ont été déployés sans être appliqués, et
+    # chaque écran renvoyait un 500 sans cause. Appliquer le schéma AVANT de
+    # déployer le code qui le lit rend l'ordre non négociable.
+    #
+    # `cd backend` est nécessaire : `db:migrate` est un script du backend et
+    # résout ses chemins depuis ce dossier.
+    buildCommand: npm ci --include=dev && npm run build && npm ci --prefix backend && cd backend && npm run db:migrate
 
     # Le superviseur DOIT partir de `backend/` : il résout `tsx` à partir du
     # dossier courant (`process.cwd()`) pour ses processus enfants. Lancé depuis
@@ -83,10 +107,6 @@ services:
     #
     # Les trois processus privés restent sur 4000/4001/4002 : injoignables de
     # l'extérieur.
-
-    # Migrations : à la main, une fois, depuis votre machine (`npm run
-    # db:migrate`). Rien à automatiser ici : `drizzle-kit` est une devDependency
-    # et ne fait pas partie du service. Voir docs/DEPLOIEMENT-RENDER.md.
 
     envVars:
       - key: DATABASE_URL

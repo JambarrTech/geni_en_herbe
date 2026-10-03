@@ -18,7 +18,7 @@
     "dev:static": "tsx watch src/server/static.ts",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
+    "db:migrate": "tsx src/db/migrate.ts",
     "db:seed:admin": "tsx src/db/seed-admin.ts",
     "db:comptes": "tsx scripts/db-etat-comptes.mjs",
     "db:studio": "drizzle-kit studio"

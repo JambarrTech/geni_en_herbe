@@ -67,8 +67,9 @@ voie de retour demeure documentée, et la CI en vérifie encore l'assemblage.
 conversation. Dans le tableau de bord Neon : *Connection* → réinitialiser le
 mot de passe de `neondb_owner`, puis mettez à jour `DATABASE_URL` dans Render.
 
-**Vérifiez que les tables existent.** Appliquez les migrations depuis votre
-machine, une seule fois :
+**Vérifiez que les tables existent.** Pour la toute première base, appliquez
+les migrations depuis votre machine — le build du premier déploiement le ferait
+aussi, mais autant voir ce qui se passe :
 
 ```bash
 cd backend
@@ -76,8 +77,18 @@ $env:DATABASE_URL="postgresql://..."   # la NOUVELLE valeur
 npm run db:migrate
 ```
 
-Les migrations sont **idempotentes** : les relancer sur une base à jour n'écrit
-rien. Inutile de les retirer du projet.
+Les migrations suivantes sont appliquées **par chaque déploiement**, sans
+intervention (voir « Les migrations sont appliquées par le build » plus bas).
+
+Relancer `npm run db:migrate` sur une base à jour n'écrit rien : le script
+s'appuie sur la table `drizzle.__drizzle_migrations` pour savoir ce qui a déjà
+été joué.
+
+⚠ Cette garantie vient de ce **tableau de suivi**, pas de ce que le SQL est
+lui-même. Les fichiers de `drizzle/` ne sont pas tous ré-exécutables : `0005`
+contient un `ALTER TABLE ... ADD COLUMN` sans `IF NOT EXISTS`. Relancer la
+commande est sans risque ; copier le SQL dans un client et l'exécuter deux fois
+ne l'est pas. Passer par `npm run db:migrate`.
 
 ### `db:seed:admin` — à ne pas lancer sur un compte qui existe
 
@@ -277,15 +288,37 @@ sur `/__static_health`, qui répond sans toucher à la base. Un cron GitHub
 Actions ne convient pas : il est en retard de plusieurs dizaines de minutes
 quand la plateforme est chargée, ce qui annule l'intérêt.
 
-## Après le premier déploiement
+## Les migrations sont appliquées par le build
 
-Le job de migration de `render.yaml` est fourni mais **désactivé** (commenté).
-C'est volontaire : les migrations sont appliquées à la main depuis votre machine
-une fois pour toutes, et un job qui s'exécute à chaque déploiement allonge
-chaque déploiement sans rien apporter. Si vous préférez l'automatiser,
-décommentez-le et **déclarez-le avant `aeerks`** : Render exécute les services
-dans l'ordre déclaré, donc le schéma sera prêt quand l'API recevra sa première
-requête.
+Elles sont appliquées **automatiquement, à chaque déploiement**, par le dernier
+maillon du `buildCommand` :
+
+```
+npm ci --include=dev && npm run build && npm ci --prefix backend && cd backend && npm run db:migrate
+```
+
+`db:migrate` exécute `backend/src/db/migrate.ts`, qui utilise
+`drizzle-orm/node-postgres/migrator`. Aucune dépendance de développement n'est
+requise pour l'appliquer : `drizzle-orm` est en `dependencies`. (`drizzle-kit`
+n'a jamais servi qu'à *générer* une migration, jamais à l'appliquer.)
+
+**Si une migration échoue, le build échoue et le déploiement est annulé.** C'est
+le point essentiel : l'ancienne version, qui fonctionne, reste en ligne, et on ne
+peut pas livrer du code qui lit une colonne absente.
+
+Cette automatisation n'est pas un raffinement de confort. Les migrations étaient
+appliquées à la main après le déploiement, et **cela a échoué deux fois** —
+`0004_broadcast_stage` puis `0005_broadcast_roster_until`. Dans les deux cas le
+code avait été déployé, la colonne n'existait pas, et chaque écran renvoyait un
+500 sans cause visible. L'ordre « déployer puis migrer » est la cause ; ce n'est
+pas l'oubli d'une fois.
+
+Pour une base locale ou un dépannage, la commande reste la même, depuis `backend/` :
+
+```powershell
+cd backend
+npm run db:migrate
+```
 
 ## Et Vercel ?
 

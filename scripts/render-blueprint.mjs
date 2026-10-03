@@ -154,6 +154,73 @@ export function auditOriginsWs(envVars, { monoOrigine }) {
 }
 
 /**
+ * Les migrations sont-elles appliquées par le build ?
+ *
+ * C'est le seul contrôle de cet audit qui protège d'une panne RÉELLEMENT
+ * constatée, deux fois dans ce projet : `0004_broadcast_stage` puis
+ * `0005_broadcast_roster_until` ont été déployés sans être appliqués. Dans les
+ * deux cas le code était en ligne sans la colonne qu'il lisait, et chaque écran
+ * renvoyait un 500 sans cause visible. Ce n'était pas un oubli, c'était l'ordre
+ * « déployer, puis migrer à la main » — rien dans le dépôt ne pouvait le
+ * contredire, puisque la commande du blueprint ne mentionnait même pas les
+ * migrations.
+ *
+ * D'où ce contrôle : la seule trace de l'obligation est le `buildCommand`, donc
+ * c'est là qu'elle doit être vérifiée, et vérifiée à chaque exécution de l'audit.
+ *
+ * Deux défaillances seulement, toutes deux en `ko` :
+ *
+ *   ABSENTE      — le schéma n'avance plus qu'à la main, et le silence revient.
+ *   MAL PLACÉE   — le script a besoin de `drizzle-orm` et `tsx`, qui viennent de
+ *                  l'installation du backend. L'exécuter avant meurt sur un
+ *                  module introuvable : bruyant, mais trompeur, et le rapport
+ *                  d'échec ne parle pas de migrations.
+ *
+ * Ni l'ordre par rapport à `npm run build`, ni la présence de `--include=dev`
+ * ne sont contrôlés. Ce sont des préférences, pas des pannes : l'audit ne doit
+ * signaler que ce qui casse, sous peine qu'on apprenne à ignorer ses constats.
+ */
+export function auditMigrationAuBuild(buildCommand) {
+  // L'ordre ne se lit que si on découpe la chaîne : `db:migrate` et
+  // `npm ci --prefix backend` peuvent être dans le même segment.
+  const etapes = (buildCommand ?? '').split(/\s*(?:&&|\|\|)\s*/);
+
+  const iMigration = etapes.findIndex((e) => /\bdb:migrate\b/.test(e));
+  const iDepBackend = etapes.findIndex((e) => /\bnpm\s+ci\b/.test(e) && /\bbackend\b/.test(e));
+
+  if (iMigration === -1) {
+    return {
+      level: KO,
+      text:
+        "buildCommand n'applique aucune migration : le schéma n'avance qu'à la main,\n" +
+        '  après le déploiement. Cet ordre a échoué deux fois — 0004_broadcast_stage\n' +
+        '  puis 0005_broadcast_roster_until — et les deux fois le code a été mis en\n' +
+        '  ligne sans sa colonne, sans autre symptôme qu\'un 500 muet.\n' +
+        "  Ajoutez `cd backend && npm run db:migrate` au build. S'il échoue, le\n" +
+        '  déploiement est annulé et la version qui fonctionne reste en service.',
+    };
+  }
+
+  if (iDepBackend !== -1 && iMigration < iDepBackend) {
+    return {
+      level: KO,
+      text:
+        'db:migrate précède l\'installation des dépendances du backend.\n' +
+        '  Le script s\'exécute avec tsx et utilise drizzle-orm : sans eux, le build\n' +
+        "  s'arrête sur un module introuvable, sans que le rapport d'échec parle\n" +
+        '  de migrations. Déplacez db:migrate après le `npm ci --prefix backend`.',
+    };
+  }
+
+  return {
+    level: OK,
+    text:
+      'Migrations appliquées par le build (db:migrate) : le schéma est en place avant ' +
+      "que le code qui le lit ne soit servi.",
+  };
+}
+
+/**
  * Audit complet d'un blueprint déjà analysé.
  *
  * @param {any} doc objet renvoyé par le parseur YAML
@@ -209,6 +276,8 @@ export function auditBlueprint(doc) {
       ? { level: INFO, text: `startCommand : ${service.startCommand}` }
       : { level: KO, text: 'startCommand ABSENT : Render ne saura pas quoi lancer.' }
   );
+
+  findings.push(auditMigrationAuBuild(service.buildCommand));
 
   // Le rôle du service décide de la valeur CORRECTE de WS_ALLOWED_ORIGINS, donc
   // il est calculé une fois et partagé : l'audit des origines ne doit pas
