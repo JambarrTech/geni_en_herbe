@@ -25,6 +25,14 @@ import { CONFIG, FLOW } from '../config.ts';
 import { validateIds } from '../lib/validate.ts';
 import { createLogger } from '../lib/logger.ts';
 import { buildMatchList, parseOptions, winnerTeamIdOf } from '../lib/matchList.ts';
+import {
+  BROADCAST_STAGE,
+  firstCursor,
+  nextCursor,
+  normalizeCursor,
+  previousCursor,
+  type BroadcastCursor,
+} from '../lib/broadcastFlow.ts';
 
 const log = createLogger('api');
 
@@ -331,6 +339,11 @@ matchesRouter.post('/:id/start', requireAuth, requireJuryOrAdmin, controlLimit, 
         status: FLOW.MATCH_STATUS.LIVE,
         startedAt: match.startedAt || new Date(),
         currentQuestionId: firstQId,
+        // Première diffusion du match : l'écran présente l'effectif des deux
+        // équipes avant la première question. `broadcast_stage` n'est remis à
+        // zéro qu'au tout premier lancement — relancer un match déjà entamé ne
+        // doit pas faire repasser l'écran public par le début de la séquence.
+        broadcastStage: match.startedAt ? match.broadcastStage : BROADCAST_STAGE.ROSTER,
         timerSecondsLeft: duration,
         timerDuration: duration,
         timerIsRunning: true,
@@ -528,6 +541,15 @@ matchesRouter.post('/:id/next-question', requireAuth, requireJuryOrAdmin, contro
       .set({
         currentQuestionIndex: nextIndex,
         currentQuestionId: nextMQ.questionId,
+        // Sauter de question à la main ramène la diffusion à l'étape « question ».
+        //
+        // Sans cela, un jury qui recule en arrière puis clique sur « Suivante »
+        // republicait l'énoncé de la question 1 avec l'étape `REVEAL` encore
+        // positionnée sur la question 2 — donc la bonne réponse de la question 2
+        // projetée en plein match, avant qu'elle n'ait été posée. Le scénario
+        // décrit la position dans le déroulé, pas la question : changer de
+        // question sans changer d'étape n'est pas un état valide.
+        broadcastStage: BROADCAST_STAGE.QUESTION,
         timerSecondsLeft: duration,
         timerDuration: duration,
         timerStartedAt: match.status === FLOW.MATCH_STATUS.LIVE && fresh ? new Date() : null,
@@ -596,6 +618,9 @@ matchesRouter.post('/:id/previous-question', requireAuth, requireJuryOrAdmin, co
       .set({
         currentQuestionIndex: prevIndex,
         currentQuestionId: prevMQ.questionId,
+        // Même raison que sur `next-question` : revenir sur une question
+        // repositionne la diffusion sur son énoncé, jamais sur sa révélation.
+        broadcastStage: BROADCAST_STAGE.QUESTION,
         timerSecondsLeft: duration,
         timerDuration: duration,
         timerStartedAt: null,
@@ -980,6 +1005,160 @@ matchesRouter.post('/:id/adjust-score', requireAuth, requireJuryOrAdmin, scoreLi
   } catch (error: any) {
     log.error('Erreur ajustement score', { err: error });
     res.status(500).json({ error: 'Erreur lors de l\'ajustement du score' });
+  }
+});
+
+// ---- Pilotage du scénario de diffusion (Jury / Admin) ----
+
+/**
+ * Avance (ou recule) l'écran public d'une étape de diffusion.
+ *
+ * POURQUOI UNE ROUTE DÉDIÉE
+ * -------------------------
+ * Le déroulé public — effectif, question, équipe A, équipe B, révélation,
+ * résultat final — est piloté par le jury avec UN bouton, pas déduit des
+ * actions existantes. Le motif est la broadcast safety : la réponse officielle
+ * part sur l'écran public quand cette route écrit `REVEAL`. Si l'avancement
+ * dépendait d'une action ordinaire (attribuer des points, passer à la question
+ * suivante), la réponse partirait au moment d'un clic destiné à autre chose, et
+ * personne ne saurait dire à coup sûr ce que le public voit. Ici, un cran du
+ * scénario est exactement un appel explicite à cette route.
+ *
+ * Le corps est `{ action: 'next' | 'previous' | 'restart' }`.
+ *  - `next`     : l'étape suivante ; refuse la dernière (FINAL), qui se termine
+ *                 par la clôture du match, pas par la diffusion.
+ *  - `previous` : l'étape précédente, pour corriger un cran de trop.
+ *  - `restart`  : retour à l'effectif des équipes, au cas où le jury présente le
+ *                 match depuis le début.
+ *
+ * Question et chronomètre : quand le curseur change de question, la question
+ * courante et le chrono suivent, exactement comme le fait `next-question`. Le
+ * chrono ne fait QUE démarrer sur une question encore fraîche (jamais résolue) ;
+ * sur les étapes de réponse et de révélation il garde l'état que le jury lui a
+ * donné avec ses propres commandes. Le scénario ne prend donc pas le chrono
+ * des mains du jury au milieu d'une question.
+ */
+matchesRouter.post('/:id/broadcast-step', requireAuth, requireJuryOrAdmin, controlLimit, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { action } = req.body || {};
+
+    const [match] = await db.select().from(matches).where(eq(matches.id, id));
+    if (!match) return res.status(404).json({ error: 'Match non trouvé' });
+
+    if (match.status === FLOW.MATCH_STATUS.FINISHED || match.status === FLOW.MATCH_STATUS.CANCELLED) {
+      return res.status(400).json({
+        error: 'Match terminé ou annulé : le scénario de diffusion est clos',
+      });
+    }
+    if (match.status === FLOW.MATCH_STATUS.SCHEDULED) {
+      return res.status(400).json({ error: 'Démarrez le match avant de lancer la diffusion' });
+    }
+
+    const mQuestions = await db
+      .select()
+      .from(matchQuestions)
+      .where(eq(matchQuestions.matchId, id))
+      .orderBy(matchQuestions.orderNumber);
+
+    const current = normalizeCursor(
+      match.broadcastStage,
+      match.currentQuestionIndex,
+      mQuestions.length
+    );
+
+    let target: BroadcastCursor | null;
+    if (action === 'previous') {
+      target = previousCursor(current, mQuestions.length);
+      if (!target) {
+        return res.status(400).json({ error: 'La diffusion est déjà à sa première étape' });
+      }
+    } else if (action === 'restart') {
+      target = firstCursor();
+    } else if (action === 'next') {
+      target = nextCursor(current, mQuestions.length);
+      if (!target) {
+        return res.status(400).json({
+          error: 'La diffusion est à son terme : terminez le match pour publier le résultat',
+        });
+      }
+    } else {
+      return res.status(400).json({ error: 'Action de diffusion invalide (next | previous | restart)' });
+    }
+
+    const questionChanged = target.questionIndex !== match.currentQuestionIndex;
+    const nextMQ = mQuestions[target.questionIndex];
+    const [nextQ] = nextMQ
+      ? await db
+          .select({ timeLimitSeconds: questions.timeLimitSeconds })
+          .from(questions)
+          .where(eq(questions.id, nextMQ.questionId))
+          .limit(1)
+      : [null];
+
+    // Une question déjà résolue ne doit être ni rouverte ni remise au chrono.
+    // C'est ce qui permet de revenir en arrière pour corriger une diffusion
+    // sans qu'une question déjà jouée reparte à zéro devant le public.
+    const fresh =
+      questionChanged && nextMQ
+        ? nextMQ.status === FLOW.QUESTION_STATUS.PENDING || nextMQ.status === FLOW.QUESTION_STATUS.ACTIVE
+        : false;
+
+    const duration = nextQ?.timeLimitSeconds || CONFIG.DEFAULT_TIMER_SECONDS;
+    // On ne relance le chrono qu'en ENTRANT sur la question d'une question
+    // fraîche, et seulement dans un sens. Reculer sur une question ne doit pas
+    // faire repartir un décompte que le jury a peut-être arrêté à dessein.
+    const armTimer = fresh && action !== 'previous';
+
+    const [updated] = await db
+      .update(matches)
+      .set({
+        broadcastStage: target.stage,
+        ...(questionChanged
+          ? {
+              currentQuestionIndex: target.questionIndex,
+              currentQuestionId: nextMQ?.questionId ?? match.currentQuestionId,
+              timerSecondsLeft: armTimer ? duration : match.timerSecondsLeft,
+              timerDuration: armTimer ? duration : match.timerDuration,
+              timerStartedAt: armTimer ? new Date() : null,
+              timerIsRunning: armTimer,
+            }
+          : {}),
+        updatedAt: new Date(),
+      })
+      .where(eq(matches.id, id))
+      .returning();
+
+    if (fresh && nextMQ) {
+      await db
+        .update(matchQuestions)
+        .set({ status: FLOW.QUESTION_STATUS.ACTIVE, startedAt: new Date() })
+        .where(eq(matchQuestions.id, nextMQ.id));
+    }
+
+    await logAudit(
+      req.user?.uid,
+      req.user?.email,
+      'BROADCAST_STEP',
+      'match',
+      String(id),
+      `Diffusion ${action}: ${current.stage} → ${target.stage} (question ${target.questionIndex + 1}/${mQuestions.length})`
+    );
+
+    const liveState = await getLiveState(match.eventId);
+    broadcast('broadcast_step', {
+      matchId: id,
+      action,
+      from: current,
+      to: target,
+      match: updated,
+      liveState,
+    });
+
+    res.json({ ...updated, broadcast: target });
+  } catch (error: any) {
+    log.error('Erreur pilotage diffusion', { err: error });
+    res.status(500).json({ error: 'Erreur lors du pilotage de la diffusion' });
   }
 });
 

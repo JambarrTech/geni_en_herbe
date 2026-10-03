@@ -10,7 +10,9 @@ import {
 } from '../db/schema.ts';
 import { eq, desc } from 'drizzle-orm';
 import { type TeamRanking, type LiveStatePayload } from '../types.ts';
-import { publicQuestion } from '../lib/sanitize.ts';
+import { publicQuestion, revealedQuestion } from '../lib/sanitize.ts';
+import { broadcastPosition, normalizeCursor } from '../lib/broadcastFlow.ts';
+import { loadPublicRosters, type PublicTeamMember } from '../lib/publicRoster.ts';
 import { publish as publishBusEvent } from './pubsub.ts';
 import { CONFIG, FLOW } from '../config.ts';
 import { createLogger } from '../lib/logger.ts';
@@ -390,27 +392,35 @@ export async function getLiveState(eventId?: number, includeRankings = false): P
     .where(eq(matches.eventId, evId))
     .orderBy(matches.matchNumber);
 
-  // Identify active match (LIVE or PAUSED or first READY)
+  // Match à afficher : en cours, en pause, ou prêt à jouer — sinon le DERNIER
+  // match terminé.
+  //
+  // Le troisième cas n'existait pas, et il rendait inatteignable l'écran des
+  // scores finaux : clôturer un match le faisait disparaître de l'état live,
+  // donc l'écran public basculait sur « le concours commence bientôt » alors que
+  // la rencontre venait d'être jouée. Les scores des deux équipes n'étaient donc
+  // projetés à aucun moment de la partie — et la branche d'écran qui devait les
+  // afficher ne pouvait pas l'être.
+  //
+  // Ce repli ne masque que le temps qu'aucun autre match ne réclame l'écran :
+  // dès que le suivant passe READY, il prend la main. La fenêtre affichée est
+  // donc exactement l'inter-match — celle où la salle regarde le résultat de ce
+  // qu'elle vient de voir.
+  //
+  // Les matchs ANNULÉS en sont exclus, eux : une rencontre abandonnée en cours de
+  // route n'a pas de résultat à afficher, et laisser ses scores définitifs à
+  // l'écran ferait passer une interruption pour un résultat. Le motif reste dans
+  // `completedMatches`, qui garde l'historique.
   const activeMatchRaw =
     allMatches.find((m) => m.status === FLOW.MATCH_STATUS.LIVE || m.status === FLOW.MATCH_STATUS.PAUSED) ||
     allMatches.find((m) => m.status === FLOW.MATCH_STATUS.READY) ||
+    [...allMatches]
+      .reverse()
+      .find((m) => m.status === FLOW.MATCH_STATUS.FINISHED) ||
     null;
 
   let activeMatch = null;
   if (activeMatchRaw) {
-    const teamA = enrichTeam(teamMap.get(activeMatchRaw.teamAId));
-    const teamB = enrichTeam(teamMap.get(activeMatchRaw.teamBId));
-
-    // Get current question (version publique : SANS la réponse officielle)
-    let currentQuestion = null;
-    if (activeMatchRaw.currentQuestionId) {
-      const [q] = await db
-        .select()
-        .from(questions)
-        .where(eq(questions.id, activeMatchRaw.currentQuestionId));
-      currentQuestion = q ? publicQuestion(q) : null;
-    }
-
     // Get match questions
     // Version publique volontairement réduite : ni le libellé, ni les points
     // attribués, ni l'équipeANTE qui a répondu. Le public voit la position dans
@@ -426,12 +436,88 @@ export async function getLiveState(eventId?: number, includeRankings = false): P
       .where(eq(matchQuestions.matchId, activeMatchRaw.id))
       .orderBy(matchQuestions.orderNumber);
 
+    // Scénario de diffusion : c'est lui, et lui seul, qui décide de ce que le
+    // public a le droit de voir. Voir `lib/broadcastFlow.ts` pour le déroulé.
+    const stage = broadcastPosition(
+      normalizeCursor(
+        activeMatchRaw.broadcastStage,
+        activeMatchRaw.currentQuestionIndex,
+        mQuestions.length
+      ),
+      mQuestions.length
+    );
+
+    // Question affichée : celle sur laquelle se pose le curseur, et non celle
+    // que porte `current_question_id`.
+    //
+    // Les deux désignent normalement la même question — `broadcast-step` écrit
+    // les deux d'un seul coup. Mais l'écran public doit montrer ce que le
+    // scénario ANNONCE : s'ils divergeaient, afficher `current_question_id`
+    // diffuserait un énoncé différent de celui de l'étape courante, et la
+    // réponse révélée à l'étape REVEAL serait celle d'une autre question que
+    // celle dont le public lit le texte. Le curseur l'emporte.
+    const cursorMQ =
+      mQuestions[stage.cursor.questionIndex] ??
+      mQuestions.find((mq) => mq.questionId === activeMatchRaw.currentQuestionId) ??
+      null;
+
+    // Get current question. La version publique est SANS la réponse officielle…
+    // …sauf à l'étape REVEAL, où le jury a explicitement diffusé la bonne
+    // réponse. La porte est le scénario, côté serveur : voir
+    // `lib/sanitize.ts`.
+    let currentQuestion = null;
+    const currentQuestionId = cursorMQ?.questionId ?? activeMatchRaw.currentQuestionId;
+    if (currentQuestionId) {
+      const [q] = await db.select().from(questions).where(eq(questions.id, currentQuestionId));
+      currentQuestion = stage.revealsAnswer ? revealedQuestion(q) : publicQuestion(q);
+    }
+
+    const teamA = enrichTeam(teamMap.get(activeMatchRaw.teamAId));
+    const teamB = enrichTeam(teamMap.get(activeMatchRaw.teamBId));
+
+    // Effectif des équipes : chargé UNIQUEMENT à l'étape `ROSTER`.
+    //
+    // Deux raisons, et la seconde compte autant que la première.
+    //  - `getLiveState` est appelé à chaque diffusion (score, changement de
+    //    question, synchronisation de chrono) : deux requêtes de plus à chaque
+    //    fois, pour des noms que l'écran n'affiche pas.
+    //  - `/api/live` est public. Tenir l'effectif en permanence l'exposerait en
+    //    continu, y compris pendant les questions. Il ne part que pendant
+    //    l'étape prévue pour le montrer.
+    //
+    // Le type est déclaré explicitement : `enrichTeam` renvoie la ligne d'équipe
+    // brute, dont le type est clos. Sans cette annotation, le contrôle de
+    // propriété en trop de TypeScript refuse `members` — le message d'erreur est
+    // ici le bon signal, on choisit donc de l'écouter plutôt que de contourner.
+    type PublicTeamRow = NonNullable<typeof teamA> & { members?: PublicTeamMember[] };
+    let teamAOut: PublicTeamRow | null = teamA;
+    let teamBOut: PublicTeamRow | null = teamB;
+    if (stage.showsRoster) {
+      const rosters = await loadPublicRosters([activeMatchRaw.teamAId, activeMatchRaw.teamBId]);
+      if (teamA) teamAOut = { ...teamA, members: rosters.get(teamA.id) ?? [] };
+      if (teamB) teamBOut = { ...teamB, members: rosters.get(teamB.id) ?? [] };
+    }
+
     activeMatch = {
       ...activeMatchRaw,
-      teamA,
-      teamB,
+      teamA: teamAOut,
+      teamB: teamBOut,
       currentQuestion,
       matchQuestions: mQuestions,
+      // Scénario dérivé, transmis tel quel : ni l'écran public ni le tableau de
+      // jury n'ont à recalculer la position, et les deux affichent donc
+      // exactement la même étape.
+      broadcast: {
+        stage: stage.cursor.stage,
+        questionIndex: stage.cursor.questionIndex,
+        questionCount: mQuestions.length,
+        stepNumber: stage.stepNumber,
+        totalSteps: stage.totalSteps,
+        canAdvance: stage.canAdvance,
+        canRewind: stage.canRewind,
+        revealsAnswer: stage.revealsAnswer,
+        showsRoster: stage.showsRoster,
+      },
     };
   }
 

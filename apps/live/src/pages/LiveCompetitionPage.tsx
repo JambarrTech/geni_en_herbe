@@ -3,6 +3,7 @@ import { useLive } from '@shared/context/LiveContext.tsx';
 import { APP_CONFIG } from '@shared/lib/config.ts';
 import { AeerksLogo } from '@shared/components/AeerksLogo.tsx';
 import { Badge, EmptyState } from '@shared/components/ui.tsx';
+import type { PublicTeamMember } from '@shared/types.ts';
 import confetti from 'canvas-confetti';
 import {
   Trophy,
@@ -13,6 +14,8 @@ import {
   Timer,
   Tv,
   HelpCircle,
+  Users,
+  CheckCircle2,
 } from 'lucide-react';
 
 /** Ancienneté d'une donnée, en français, de façon compacte. */
@@ -92,6 +95,27 @@ export const LiveCompetitionPage: React.FC = () => {
 
   const currentQ = activeMatch?.currentQuestion;
 
+  /**
+   * Scénario de diffusion en cours.
+   *
+   * Le serveur joint `broadcast` à l'état live, déjà normalisé : étape en cours,
+   * position dans le scénario, et — le point important — les deux indicateurs
+   * `revealsAnswer` et `showsRoster` qui disent ce que le public a le droit de
+   * voir. L'écran ne recalecule rien de tout cela : il ne fait qu'appliquer ce que
+   * le serveur a décidé de lui envoyer.
+   */
+  const broadcast = activeMatch?.broadcast;
+  const stage = broadcast?.stage ?? null;
+  const isRoster = broadcast?.showsRoster === true;
+  const revealVisible = broadcast?.revealsAnswer === true;
+  // Prise de parole en cours, ou `null` en dehors des deux étapes de réponse.
+  const answerTurn: 'a' | 'b' | null =
+    stage === 'ANSWER_A' ? 'a' : stage === 'ANSWER_B' ? 'b' : null;
+  // L'étape FINAL montre déjà le score de la rencontre pendant que le jury peut
+  // encore corriger ; un match clôturé le garde à l'écran jusqu'à ce qu'un autre
+  // prenne la main. Un seul écran pour les deux moments.
+  const showFinalScore = stage === 'FINAL' || activeMatch?.status === 'FINISHED';
+
   /* ------------------------------------------------------------------ */
   /* Fragments                                                          */
   /* ------------------------------------------------------------------ */
@@ -107,20 +131,32 @@ export const LiveCompetitionPage: React.FC = () => {
     </div>
   );
 
-  /** Grande carte de score d'une equipe. */
+  /**
+   * Grande carte de score d'une equipe.
+   *
+   * `highlight` sert aux étapes « réponse de l'équipe » : l'équipe à la parole
+   * est la seule à monter en volume et en contraste. La mise en avant passe par
+   * la bordure et le fond, pas par une animation — un vidéoprojecteur en
+   * direct ne supporte ni le mouvement ni les distinctions subtiles de teinte.
+   */
   const TeamScoreCard = ({
     team,
     score,
     accent,
+    highlight = false,
   }: {
     team?: { code?: string | null; name?: string | null } | null;
     score: number;
     accent: 'a' | 'b';
+    highlight?: boolean;
   }) => (
     <div
       className={[
-        'relative overflow-hidden rounded-2xl border border-white/12 bg-slate-900/40',
+        'relative overflow-hidden rounded-2xl border bg-slate-900/40',
         'flex flex-col justify-between p-5 sm:p-7',
+        highlight
+          ? 'border-amber-300/70 bg-amber-400/10 ring-2 ring-amber-300/40'
+          : 'border-white/12',
       ].join(' ')}
     >
       {/* Liseré de couleur : indique l'équipe sans dependen du nom. */}
@@ -132,19 +168,95 @@ export const LiveCompetitionPage: React.FC = () => {
         ].join(' ')}
       />
       <div className="min-w-0">
-        <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+        <span
+          className={[
+            'text-[11px] font-semibold uppercase tracking-[0.16em]',
+            highlight ? 'text-amber-200' : 'text-slate-400',
+          ].join(' ')}
+        >
           {team?.code || (accent === 'a' ? 'Équipe A' : 'Équipe B')}
+          {highlight && (
+            <span className="ml-2 rounded-full bg-amber-400 px-2 py-0.5 text-[10px] font-bold text-slate-900">
+              À la parole
+            </span>
+          )}
         </span>
         <h3 className="mt-1 truncate text-xl font-bold text-white sm:text-2xl">
           {team?.name || '—'}
         </h3>
       </div>
       <p
-        className="my-5 text-center text-6xl font-bold tabular-nums tracking-tight text-white sm:text-7xl lg:text-8xl"
+        className={[
+          'my-5 text-center text-6xl font-bold tabular-nums tracking-tight sm:text-7xl lg:text-8xl',
+          highlight ? 'text-amber-200' : 'text-white',
+        ].join(' ')}
         aria-label={`${team?.name ?? 'Équipe'} : ${score} points`}
       >
         {score}
       </p>
+    </div>
+  );
+
+  /**
+   * Colonne d'effectif pour une equipe.
+   *
+   * Seuls prenom et nom sont affiches — c'est tout ce que le serveur envoie
+   * pendant cette etape (cf. `backend/src/lib/publicRoster.ts`). Aucun genre,
+   * aucune photo, aucune coordonnee ne traverse le WebSocket.
+   */
+  const RosterColumn = ({
+    team,
+    members,
+    accent,
+  }: {
+    team?: { code?: string | null; name?: string | null } | null;
+    members?: PublicTeamMember[];
+    accent: 'a' | 'b';
+  }) => (
+    <div
+      className={[
+        'relative overflow-hidden rounded-2xl border border-white/12 bg-slate-900/40 p-5 sm:p-7',
+      ].join(' ')}
+    >
+      <span
+        aria-hidden="true"
+        className={[
+          'absolute inset-y-0 w-1',
+          accent === 'a' ? 'left-0 bg-[#2563EB]' : 'right-0 bg-[#0B3B82]',
+        ].join(' ')}
+      />
+      <div className="min-w-0">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+          {team?.code || (accent === 'a' ? 'Équipe A' : 'Équipe B')}
+        </span>
+        <h3 className="mt-1 text-balance text-xl font-bold text-white sm:text-2xl">
+          {team?.name || '—'}
+        </h3>
+      </div>
+
+      {members && members.length > 0 ? (
+        <ul className="mt-5 divide-y divide-white/8">
+          {members.map((m, i) => (
+            <li
+              key={`${m.lastName}-${m.firstName}-${i}`}
+              className="flex items-center justify-between gap-3 py-2.5"
+            >
+              <span className="min-w-0 truncate text-base font-medium text-white sm:text-lg">
+                {m.firstName} {m.lastName}
+              </span>
+              {m.role === 'CAPTAIN' && (
+                <span className="shrink-0 rounded-full border border-amber-400/40 bg-amber-400/10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-200">
+                  Capitaine
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-5 text-sm text-slate-400">
+          Effectif non renseigné pour cette équipe.
+        </p>
+      )}
     </div>
   );
 
@@ -213,6 +325,124 @@ export const LiveCompetitionPage: React.FC = () => {
           <span className="ml-1.5 text-sm font-medium text-slate-400">pts</span>
         </p>
       </div>
+    );
+  };
+
+  /**
+   * Bandeau « c'est au tour de l'équipe X ».
+   *
+   * Sur demande, l'écran montre une simple surbrillance : le public n'a pas le
+   * libellé de ce que l'équipe a repondu, seulement le moment ou elle parle. Le
+   * jury decide du verdict et des points depuis sa table ; l'ecran se contente de
+   * designe la prise de parole.
+   */
+  const AnswerTurnBanner = ({
+    team,
+    accent,
+  }: {
+    team?: { code?: string | null; name?: string | null } | null;
+    accent: 'a' | 'b';
+  }) => (
+    <div
+      role="status"
+      className="flex flex-col items-center gap-2 rounded-2xl border-2 border-amber-300/60 bg-amber-400/10 px-6 py-6 text-center sm:py-8"
+    >
+      <span className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-300/90">
+        À la parole
+      </span>
+      <span className="text-balance text-3xl font-bold text-amber-100 sm:text-4xl lg:text-5xl">
+        {team?.name || (accent === 'a' ? 'Équipe A' : 'Équipe B')}
+      </span>
+    </div>
+  );
+
+  /**
+   * Reponse officielle revelee par le jury.
+   *
+   * Ce bloc n'est rendu qu'a l'etape REVEAL du scenario, et `currentQ.answer`
+   * n'est present dans le payload qu'a cette etape : si le texte manque, c'est
+   * que le serveur ne l'a pas envoye, et l'ecran ne doit surtout pas le
+   * reconstituer.
+   */
+  const RevealCard = ({ answer }: { answer?: string }) => (
+    <div className="rounded-2xl border-2 border-emerald-400/50 bg-emerald-400/10 p-5 sm:p-7">
+      <div className="flex items-center justify-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-200">
+        <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+        <span>Bonne réponse</span>
+      </div>
+      <p className="mt-3 text-balance text-center text-2xl font-bold text-emerald-50 sm:text-3xl lg:text-4xl">
+        {answer ?? '—'}
+      </p>
+    </div>
+  );
+
+  /**
+   * Ecran de resultat final d'une rencontre.
+   *
+   * Utilise a deux moments distincts : a l'etape FINAL du scenario, pendant que
+   * le match est encore en cours — le jury peut encore corriger — puis une fois
+   * le match cloture, tant qu'aucun autre match ne prend la main. Le libelle
+   * change en consequence : « officiel » n'apparait qu'a la cloture.
+   */
+  const FinalScoreScreen = ({ official }: { official: boolean }) => {
+    const winner =
+      activeMatch!.scoreA === activeMatch!.scoreB
+        ? null
+        : activeMatch!.scoreA > activeMatch!.scoreB
+          ? 'a'
+          : 'b';
+    return (
+      <>
+        <Badge tone="accent" className="px-3.5 py-1.5 text-xs">
+          {official ? (
+            <>
+              <Trophy className="h-3.5 w-3.5" aria-hidden="true" />
+              Match officiellement terminé
+            </>
+          ) : (
+            <>
+              <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+              Dernière question passée
+            </>
+          )}
+        </Badge>
+
+        <h2 className="text-balance text-3xl font-bold tracking-tight text-white sm:text-4xl">
+          Score final de la rencontre
+        </h2>
+
+        <div className="mx-auto grid max-w-3xl grid-cols-1 gap-5 sm:grid-cols-2">
+          <TeamScoreCard
+            team={activeMatch!.teamA}
+            score={activeMatch!.scoreA}
+            accent="a"
+            highlight={winner === 'a'}
+          />
+          <TeamScoreCard
+            team={activeMatch!.teamB}
+            score={activeMatch!.scoreB}
+            accent="b"
+            highlight={winner === 'b'}
+          />
+        </div>
+
+        {winner && (
+          <p className="mx-auto max-w-2xl text-balance text-center text-xl font-semibold text-amber-200 sm:text-2xl">
+            {winner === 'a' ? activeMatch!.teamA?.name : activeMatch!.teamB?.name} remporte la
+            rencontre.
+          </p>
+        )}
+
+        <div className="mx-auto mt-2 max-w-xl rounded-2xl border border-amber-400/30 bg-amber-400/10 p-5">
+          <p className="text-sm font-semibold text-amber-200">
+            Génie en Herbe — délibérations en cours
+          </p>
+          <p className="mt-1.5 text-pretty text-xs leading-relaxed text-slate-300">
+            Merci aux participants. Les résultats officiels et le classement général seront
+            proclamés dès validation par le jury et l'administration de l'AEERKS.
+          </p>
+        </div>
+      </>
     );
   };
 
@@ -391,48 +621,59 @@ export const LiveCompetitionPage: React.FC = () => {
               communauté de Keur Salla Mbatta.
             </p>
           </section>
-        ) : activeMatch.status === 'FINISHED' ? (
-          /* CAS C : fin du match */
+        ) : showFinalScore ? (
+          /* CAS C : résultat final de la rencontre.
+             Deux moments partagent cet écran : l'étape FINAL du scénario, alors
+             que le match est encore en cours et que le jury peut encore
+             corriger, puis le match clôturé, tant qu'aucun autre ne prend la
+             main. D'où `official`, qui n'est vrai qu'après la clôture. */
           <section id="screen-match-finished" className="space-y-6 text-center">
-            <Badge tone="accent" className="px-3.5 py-1.5 text-xs">
-              Match officiellement terminé
-            </Badge>
+            <FinalScoreScreen official={activeMatch.status === 'FINISHED'} />
+          </section>
+        ) : isRoster ? (
+          /* CAS D1 : effectif des deux équipes, première étape du déroulé. */
+          <section id="screen-roster" className="space-y-6">
+            <div className="text-center">
+              <Badge
+                tone="primary"
+                className="border-blue-400/30 bg-blue-500/10 text-blue-200"
+              >
+                <Users className="h-3.5 w-3.5" aria-hidden="true" />
+                Les équipes en lice
+              </Badge>
+              <h2 className="mt-3 text-balance text-3xl font-bold tracking-tight text-white sm:text-4xl">
+                {activeMatch.teamA?.name ?? 'Équipe A'} contre{' '}
+                {activeMatch.teamB?.name ?? 'Équipe B'}
+              </h2>
+            </div>
 
-            <h2 className="text-balance text-3xl font-bold tracking-tight text-white sm:text-4xl">
-              Score final de la rencontre
-            </h2>
-
-            <div className="mx-auto grid max-w-3xl grid-cols-1 gap-5 sm:grid-cols-2">
-              <TeamScoreCard
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+              <RosterColumn
                 team={activeMatch.teamA}
-                score={activeMatch.scoreA}
+                members={activeMatch.teamA?.members}
                 accent="a"
               />
-              <TeamScoreCard
+              <RosterColumn
                 team={activeMatch.teamB}
-                score={activeMatch.scoreB}
+                members={activeMatch.teamB?.members}
                 accent="b"
               />
             </div>
-
-            <div className="mx-auto mt-2 max-w-xl rounded-2xl border border-amber-400/30 bg-amber-400/10 p-5">
-              <p className="text-sm font-semibold text-amber-200">
-                Génie en Herbe — délibérations en cours
-              </p>
-              <p className="mt-1.5 text-pretty text-xs leading-relaxed text-slate-300">
-                Merci aux participants. Les résultats officiels et le classement général seront
-                proclamés dès validation par le jury et l'administration de l'AEERKS.
-              </p>
-            </div>
           </section>
         ) : (
-          /* CAS D : pendant le match */
+          /* CAS D2 : déroulé de la rencontre — question, prises de parole,
+             révélation. */
           <section id="screen-match-live" className="space-y-5">
             {activeMatch.status === 'PAUSED' && PausedBanner}
 
             <div className="grid grid-cols-1 items-center gap-5 md:grid-cols-12">
               <div className="md:col-span-5">
-                <TeamScoreCard team={activeMatch.teamA} score={activeMatch.scoreA} accent="a" />
+                <TeamScoreCard
+                  team={activeMatch.teamA}
+                  score={activeMatch.scoreA}
+                  accent="a"
+                  highlight={answerTurn === 'a'}
+                />
               </div>
 
               {/* Chrono */}
@@ -463,17 +704,35 @@ export const LiveCompetitionPage: React.FC = () => {
               </div>
 
               <div className="md:col-span-5">
-                <TeamScoreCard team={activeMatch.teamB} score={activeMatch.scoreB} accent="b" />
+                <TeamScoreCard
+                  team={activeMatch.teamB}
+                  score={activeMatch.scoreB}
+                  accent="b"
+                  highlight={answerTurn === 'b'}
+                />
               </div>
             </div>
 
-            {/* Question lue aux candidats — la réponse n'est JAMAIS affichée ici. */}
+            {/* Prise de parole : surbrillance de l'équipe, sans le libellé de ce
+                qu'elle a répondu — le jury statue, l'écran montre qui parle. */}
+            {answerTurn && (
+              <AnswerTurnBanner
+                team={answerTurn === 'a' ? activeMatch.teamA : activeMatch.teamB}
+                accent={answerTurn}
+              />
+            )}
+
+            {/* Question lue aux candidats. La réponse n'est jointe qu'à l'étape
+                REVEAL — et affichée plus bas, après l'énoncé. */}
             {currentQ ? (
               <div className="rounded-2xl border border-white/12 bg-slate-900/50 p-5 sm:p-7">
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge tone="primary" className="border-[#2563EB]/40 bg-[#2563EB]/20 text-blue-100">
-                      Question {activeMatch.currentQuestionIndex + 1}
+                    <Badge
+                      tone="primary"
+                      className="border-[#2563EB]/40 bg-[#2563EB]/20 text-blue-100"
+                    >
+                      Question {(broadcast?.questionIndex ?? activeMatch.currentQuestionIndex) + 1}
                     </Badge>
                     {currentQ.categoryName && (
                       <Badge className="border-white/15 bg-white/5 text-slate-200">
@@ -517,6 +776,10 @@ export const LiveCompetitionPage: React.FC = () => {
                 </p>
               </div>
             )}
+
+            {/* Révélation : n'est rendue qu'à l'étape REVEAL, et `answer` n'est
+                présent dans le payload qu'à cette étape. */}
+            {revealVisible && currentQ && <RevealCard answer={currentQ.answer} />}
           </section>
         )}
       </main>

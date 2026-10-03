@@ -3,8 +3,10 @@ import { describe, it, expect } from 'vitest';
 import {
   SCORE_REASONS,
   SCORE_SHORTCUTS,
+  BROADCAST_SHORTCUTS,
   hasModifier,
   isTypingTarget,
+  resolveBroadcastShortcut,
   resolveNavShortcut,
   resolveScoreShortcut,
 } from '@apps/jury/src/lib/juryShortcuts.ts';
@@ -154,6 +156,59 @@ describe('resolveNavShortcut — bornes de navigation', () => {
   it('renvoie null pour une touche non directionnelle', () => {
     expect(resolveNavShortcut('a', { currentIndex: 1, questionCount: 3 })).toBeNull();
     expect(resolveNavShortcut('ArrowUp', { currentIndex: 1, questionCount: 3 })).toBeNull();
+  });
+});
+
+describe('resolveBroadcastShortcut — pilotage de la diffusion', () => {
+  it("'n' avance d'un cran, 'r' recule d'un cran", () => {
+    expect(resolveBroadcastShortcut('n')).toBe('next');
+    expect(resolveBroadcastShortcut('r')).toBe('previous');
+  });
+
+  it('accepte la majuscule, ce que produirait Verr. Maj.', () => {
+    // Même raison que pour les touches de score : un jury ayant Verr. Maj.
+    // activé doit pouvoir piloter l'écran sans lâcher la souris.
+    expect(resolveBroadcastShortcut('N')).toBe('next');
+    expect(resolveBroadcastShortcut('R')).toBe('previous');
+  });
+
+  it('ne vole aucune touche aux raccourcis de score', () => {
+    // Le risque réel d'ajouter une table : une collision silencieuse. `a`, `e`,
+    // `1` et `2` doivent rester des attributions de points, jamais un pilotage
+    // de l'écran — un jury qui tape « A » pour valider une bonne réponse
+    // décalerait au lieu de noter.
+    for (const key of ['a', 'e', 'z', 's', '1', '2']) {
+      expect(resolveBroadcastShortcut(key)).toBeNull();
+      expect(resolveScoreShortcut(key, CTX)).not.toBeNull();
+    }
+  });
+
+  it('ne vole aucune touche à la navigation entre questions', () => {
+    // Les flèches pilotent la liste de questions ; c'est le handler qui décide de
+    // cet ordre, mais la table doit rester muette sur elles.
+    expect(resolveBroadcastShortcut('ArrowRight')).toBeNull();
+    expect(resolveBroadcastShortcut('ArrowLeft')).toBeNull();
+  });
+
+  it('renvoie null pour une touche qui ne pilote rien', () => {
+    for (const key of ['b', 'q', 'Enter', ' ', 'Escape', 'Tab', 'F5', 'ArrowUp']) {
+      expect(resolveBroadcastShortcut(key)).toBeNull();
+    }
+  });
+});
+
+describe('BROADCAST_SHORTCUTS — la table elle-même', () => {
+  it('décrit exactement deux touches', () => {
+    // Une clé dupliquée dans un littéral objet écrase la première SANS AVERTIR.
+    expect(Object.keys(BROADCAST_SHORTCUTS).sort()).toEqual(['n', 'r']);
+  });
+
+  it('ne contient ni "restart" ni aucune action sans touche', () => {
+    // `restart` (« reprendre au début ») est volontairement un bouton sans
+    // raccourci : c'est une reprise après incident, pas un geste du direct.
+    const values = Object.values(BROADCAST_SHORTCUTS);
+    expect(values).not.toContain('restart');
+    expect(values).toEqual(['next', 'previous']);
   });
 });
 

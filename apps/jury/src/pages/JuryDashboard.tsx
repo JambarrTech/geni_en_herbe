@@ -9,8 +9,10 @@ import {
   SCORE_REASONS,
   hasModifier,
   isTypingTarget,
+  resolveBroadcastShortcut,
   resolveNavShortcut,
   resolveScoreShortcut,
+  type BroadcastAction,
 } from '../lib/juryShortcuts.ts';
 import {
   Play,
@@ -26,7 +28,39 @@ import {
   Sliders,
   RefreshCw,
   Keyboard,
+  Tv,
+  SkipForward,
+  Rewind,
 } from 'lucide-react';
+import type { BroadcastStage, MatchBroadcast } from '@shared/types.ts';
+
+/**
+ * Libellés des étapes du scénario de diffusion.
+ *
+ * Ils vivent ici, et non dans `backend/src/lib/broadcastFlow.ts`, pour une
+ * raison simple : `apps/jury` ne compile pas le backend, donc aucune table
+ * partagée n'est atteignable depuis les deux côtés. Les VALEURS sont typées par
+ * `Record<BroadcastStage, string>`, ce qui fait échouer le typecheck si le
+ * serveur ajoute une étape sans libellé — l'oubli devient impossible au lieu
+ * d'être silencieux.
+ */
+const BROADCAST_STAGE_LABELS: Record<BroadcastStage, string> = {
+  ROSTER: 'Effectif des équipes',
+  QUESTION: 'Question à l’écran',
+  ANSWER_A: 'Réponse de l’équipe A',
+  ANSWER_B: 'Réponse de l’équipe B',
+  REVEAL: 'Révélation de la bonne réponse',
+  FINAL: 'Résultat final de la rencontre',
+};
+
+/**
+ * Étapes qui n'appartiennent à aucune question.
+ *
+ * Le compteur « question 3 / 10 » n'a de sens que sur les quatre étapes de la
+ * série : pendant l'effectif ou le résultat final, il ferait croire au jury que
+ * le public regarde une question alors qu'il regarde autre chose.
+ */
+const STAGES_PER_MATCH: readonly BroadcastStage[] = ['ROSTER', 'FINAL'];
 
 /** Détail complet d'un match tel que renvoyé par GET /api/matches/:id (jury). */
 interface MatchDetail {
@@ -54,6 +88,8 @@ interface MatchDetail {
     winningTeamId?: number | null;
   }>;
   scoreEvents?: ScoreEventItem[];
+  /** Scénario de diffusion de l'écran public — absent si le match n'a jamais été diffusé. */
+  broadcast?: MatchBroadcast;
 }
 
 interface ScoreResponse {
@@ -308,6 +344,27 @@ export const JuryDashboard: React.FC = () => {
   }, [selectedMatchId, runAction, showFeedback, loadMatchDetails]);
 
   /**
+   * Pilotage du scénario de diffusion affiché au public.
+   *
+   * Volontairement une action par elle-même, distincte d'attribuer des points
+   * ou de changer de question : c'est elle qui décide du moment où la bonne
+   * réponse part sur l'écran projeté. Liée à un clic de score, la réponse
+   * partirait au moment d'une décision de notation, et plus personne à la table
+   * ne saurait dire à coup sûr ce que le public regarde.
+   */
+  const handleBroadcastStep = useCallback(
+    (action: BroadcastAction) => {
+      if (selectedMatchId == null) return;
+      void runAction('Diffusion', async () => {
+        await api.post(`/api/matches/${selectedMatchId}/broadcast-step`, { action });
+        await loadMatchDetails(selectedMatchId);
+        void refreshLiveState();
+      });
+    },
+    [selectedMatchId, runAction, loadMatchDetails, refreshLiveState]
+  );
+
+  /**
    * Attribution de points.
    *
    * L'identifiant de match provient désormais de `matchDetails` — la MÊME
@@ -407,6 +464,23 @@ export const JuryDashboard: React.FC = () => {
 
   const isRunning =
     matchDetails?.status === 'LIVE' || matchDetails?.status === 'PAUSED';
+
+  // --- Scénario de diffusion -------------------------------------------------
+  //
+  // Tout est lu, rien n'est recalculé : le serveur envoie la position du
+  // scénario déjà normalisée (`matchDetails.broadcast`). Le jury voit donc
+  // littéralement ce que voit le public, sans qu'une règle de séquence soit
+  // dupliquée ici — et sans qu'un désaccord entre les deux écrans soit possible.
+  const broadcast = matchDetails?.broadcast ?? null;
+  const broadcastStage: BroadcastStage | null = broadcast?.stage ?? null;
+  // Le pilotage n'a de sens que sur un match démarré : la route refuse avant, et
+  // un bouton actif qui échoue à chaque clic apprend au jury à ne pas s'en servir.
+  const canBroadcast = isRunning && !actionLoading;
+  const broadcastQuestionLabel =
+    broadcast && broadcastStage && !STAGES_PER_MATCH.includes(broadcastStage)
+      ? `Question ${broadcast.questionIndex + 1} / ${broadcast.questionCount}`
+      : null;
+
   // On ne peut pas scorer un match non démarré, ni sans question courante :
   // le bouton « Faux (0 pt) » envoyait alors `questionId: undefined` et
   // chaque clic valait 10 points.
@@ -467,6 +541,23 @@ export const JuryDashboard: React.FC = () => {
         e.preventDefault();
         if (nav === 'next') handleNextQuestion();
         else handlePrevQuestion();
+        return;
+      }
+
+      // Pilotage de la diffusion. Placé APRÈS la navigation : les flèches restent
+      // la navigation entre questions, même quand le scénario est le bouton le
+      // plus utilisé — sinon `→` piloterait l'écran au lieu de la question, et un
+      // jury habitué à son clavier avancerait la liste de questions d'un cran
+      // par question jouée au lieu de diffuser l'étape.
+      //
+      // `canBroadcast` suffit comme garde : il contient déjà `!actionLoading`,
+      // testé ici par ailleurs pour la notation.
+      if (canBroadcast) {
+        const step = resolveBroadcastShortcut(e.key);
+        if (step) {
+          e.preventDefault();
+          handleBroadcastStep(step);
+        }
       }
     }
 
@@ -475,6 +566,7 @@ export const JuryDashboard: React.FC = () => {
   }, [
     matchDetails,
     canScore,
+    canBroadcast,
     actionLoading,
     currentIdx,
     matchQuestionsList.length,
@@ -482,6 +574,7 @@ export const JuryDashboard: React.FC = () => {
     handleScore,
     handleNextQuestion,
     handlePrevQuestion,
+    handleBroadcastStep,
   ]);
 
   return (
@@ -920,6 +1013,8 @@ export const JuryDashboard: React.FC = () => {
                   ['S', 'Réponse fausse — Équipe B (0 pt)'],
                   ['←', 'Question précédente'],
                   ['→', 'Question suivante'],
+                  ['N', 'Diffuser l’étape suivante à l’écran public'],
+                  ['R', 'Reculer d’une étape à l’écran public'],
                 ].map(([key, label]) => (
                   <div key={key} className="flex items-center gap-2.5">
                     <kbd className="shrink-0 min-w-[1.6rem] text-center px-1.5 py-0.5 rounded-md border border-slate-300 bg-slate-50 font-mono text-[11px] font-bold text-slate-700">
@@ -930,6 +1025,135 @@ export const JuryDashboard: React.FC = () => {
                 ))}
               </div>
             </details>
+
+            {/* ---------- Scénario de diffusion sur l'écran public ----------
+                Placé juste au-dessus de l'énoncé, parce que c'est là que se
+                trouve l'information que le jury manipule le plus souvent en
+                direct : « qu'est-ce que le public regarde en ce moment ? ». */}
+            {isRunning && (
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+                <div className="bg-[#0B3B82] px-6 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/15 text-white">
+                      <Tv className="w-4 h-4" aria-hidden="true" />
+                    </span>
+                    <div className="min-w-0">
+                      <div className="text-[11px] font-bold uppercase tracking-wider text-blue-200">
+                        Scénario de diffusion — écran public
+                      </div>
+                      {/* `aria-live` SANS `role="status"`, volontairement.
+
+                          L'étape affichée est un état permanent, pas une annonce
+                          éphémère : `role="status"` conviendrait à un message qui
+                          s'efface, et surtout il ferait de ce bloc une DEUXIÈME
+                          région live à côté du bandeau de retour d'action — deux
+                          lecteurs d'écran annonces simultanées pour un seul clic,
+                          et les tests qui cherchent le retour d'attribution
+                          trouveraient deux correspondances.
+
+                          Le contenu ne changeant que lorsque le jury change
+                          d'étape, `aria-live="polite"` suffit à prévenir, et
+                          l'élément existe en permanence dans le DOM — condition
+                          pour que l'annonce soit fiable. */}
+                      <div
+                        aria-live="polite"
+                        className="text-base font-bold text-white truncate"
+                      >
+                        {broadcastStage
+                          ? BROADCAST_STAGE_LABELS[broadcastStage]
+                          : 'Diffusion non démarrée'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {broadcast && (
+                    <div className="flex items-center gap-2.5">
+                      {broadcastQuestionLabel && (
+                        <span className="rounded-full bg-white/15 px-3 py-1 text-xs font-semibold text-white">
+                          {broadcastQuestionLabel}
+                        </span>
+                      )}
+                      <span className="text-xs font-bold tabular-nums text-blue-200">
+                        Étape {broadcast.stepNumber} / {broadcast.totalSteps}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-5 sm:p-6 flex flex-wrap items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                      L'écran affiche
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-slate-700">
+                      {broadcastStage === 'REVEAL'
+                        ? 'La bonne réponse est diffusée au public.'
+                        : broadcastStage === 'ROSTER'
+                          ? 'La liste des participants des deux équipes.'
+                          : broadcastStage === 'ANSWER_A' || broadcastStage === 'ANSWER_B'
+                            ? `La prise de parole de l'équipe ${broadcastStage === 'ANSWER_A' ? 'A' : 'B'}.`
+                            : broadcastStage === 'FINAL'
+                              ? 'Le score final des deux équipes.'
+                              : currentQ
+                                ? `L'énoncé de la question ${(broadcast?.questionIndex ?? currentIdx) + 1}, sans sa réponse.`
+                                : 'L\'écran d\'attente, le jury prépare la suite.'}
+                    </p>
+                    {broadcastStage === 'REVEAL' && (
+                      <p className="mt-1.5 text-xs font-semibold text-amber-800">
+                        Les scores et points se valident depuis les boutons des
+                        équipes ci-dessus, comme d'habitude.
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <button
+                      id="btn-broadcast-restart"
+                      type="button"
+                      disabled={!canBroadcast}
+                      onClick={() => handleBroadcastStep('restart')}
+                      title="Revenir au début du scénario (effectif des équipes)"
+                      className="px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>Reprendre au début</span>
+                    </button>
+
+                    <button
+                      id="btn-broadcast-previous"
+                      type="button"
+                      disabled={!canBroadcast}
+                      aria-keyshortcuts="R"
+                      onClick={() => handleBroadcastStep('previous')}
+                      title="Reculer d'une étape (raccourci : R)"
+                      className="px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+                    >
+                      <Rewind className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>Reculer</span>
+                    </button>
+
+                    <button
+                      id="btn-broadcast-next"
+                      type="button"
+                      disabled={!canBroadcast}
+                      aria-keyshortcuts="N"
+                      onClick={() => handleBroadcastStep('next')}
+                      title={
+                        broadcast?.canAdvance === false
+                          ? 'Dernière étape atteinte : terminez le match'
+                          : 'Diffuser l\'étape suivante (raccourci : N)'
+                      }
+                      className="px-5 py-2.5 rounded-xl bg-[#0B3B82] hover:bg-[#2563EB] text-white text-xs font-bold shadow-xs flex items-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-1"
+                    >
+                      <span>
+                        {broadcast?.canAdvance === false ? 'Scénario terminé' : 'Étape suivante'}
+                      </span>
+                      <SkipForward className="w-3.5 h-3.5" aria-hidden="true" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Current Question & Official Answer Display (Jury Only) */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">

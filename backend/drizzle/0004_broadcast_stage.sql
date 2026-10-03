@@ -1,0 +1,11 @@
+-- Étape du scénario de diffusion sur écran public.
+--
+-- Cette colonne commande ce que l'écran public est autorisé à afficher :
+-- `getLiveState` n'inclut la réponse officielle que si l'étape vaut 'REVEAL',
+-- et l'effectif des équipes que si elle vaut 'ROSTER'. Elle n'est écrite que
+-- par la route jury/admin `POST /api/matches/:id/broadcast-step`.
+--
+-- `NOT NULL DEFAULT 'ROSTER'` : la valeur de repli est la PREMIÈRE étape du
+-- déroulé, donc un match jamais diffusé reste coherent — et, surtout, n'est
+-- jamais dans un état qui exposerait la bonne réponse.
+ALTER TABLE "matches" ADD COLUMN "broadcast_stage" text DEFAULT 'ROSTER' NOT NULL;

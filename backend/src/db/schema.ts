@@ -170,6 +170,18 @@ export const matches = pgTable(
     timerStartedAt: timestamp('timer_started_at'),
     timerDuration: integer('timer_duration').notNull().default(15),
     activeTeamTurn: text('active_team_turn').default('all'), // 'team_a' | 'team_b' | 'all'
+    // Étape du scénario de diffusion sur écran public (cf. lib/broadcastFlow.ts).
+    //
+    // CETTE COLONNE EST UNE PORTE DE SÉCURITÉ, pas un simple libellé d'interface :
+    // `getLiveState` n'envoie la réponse officielle au public que si elle vaut
+    // 'REVEAL', et l'effectif des équipes que si elle vaut 'ROSTER'. Elle n'est
+    // écrite que par la route jury/admin `POST /:id/broadcast-step`.
+    //
+    // La valeur par défaut est 'ROSTER' : un match qui démarre et dont le jury
+    // n'a encore rien diffusé montre l'effectif, ce qui est la première étape du
+    // déroulé. Elle est aussi la valeur de repli pour une ligne dont l'étape a
+    // été corrompue (cf. `normalizeCursor`).
+    broadcastStage: text('broadcast_stage').notNull().default('ROSTER'), // 'ROSTER' | 'QUESTION' | 'ANSWER_A' | 'ANSWER_B' | 'REVEAL' | 'FINAL'
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },

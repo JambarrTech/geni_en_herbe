@@ -204,3 +204,34 @@ export function resolveNavShortcut(
   }
   return null;
 }
+
+/** Action de pilotage du scénario de diffusion sur l'écran public. */
+export type BroadcastAction = 'next' | 'previous' | 'restart';
+
+/**
+ * Touches de pilotage de la diffusion.
+ *
+ * `n` avance d'un cran, `r` recule d'un cran. Ces deux lettres étaient libres :
+ * la table de score occupe a, e, 1, 2, z, s, et la navigation les flèches.
+ *
+ * Elles sont rappelées à l'écran et portées par les `aria-keyshortcuts` des
+ * boutons, comme les autres : cette table en reste l'unique source.
+ */
+export const BROADCAST_SHORTCUTS = {
+  n: 'next',
+  r: 'previous',
+} as const satisfies Record<string, BroadcastAction>;
+
+/**
+ * Traduit une touche en pilotage de la diffusion, ou `null` si elle n'en est pas
+ * une.
+ *
+ * Pas de vérification de bornes ici, contrairement à `resolveNavShortcut` : la
+ * route serveur refuse déjà un cran avant le début ou après la fin, et elle
+ * répond par un message explicite. Dupliquer cette règle ici obligerait le jury
+ * à maintenir deux emplacements d'une même limite — dont un deviendrait faux
+ * dès que le serveur change.
+ */
+export function resolveBroadcastShortcut(key: string): BroadcastAction | null {
+  return BROADCAST_SHORTCUTS[key.toLowerCase() as keyof typeof BROADCAST_SHORTCUTS] ?? null;
+}

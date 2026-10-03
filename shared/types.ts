@@ -111,6 +111,50 @@ export interface MatchQuestionItem {
   question?: QuestionItem;
 }
 
+/**
+ * Étape du scénario de diffusion sur l'écran public.
+ *
+ * Doublon assumé de `backend/src/lib/broadcastFlow.ts` : le backend et les
+ * frontends sont des paquets distincts (`shared/` n'est pas importable depuis
+ * `backend/src/`), donc l'énumération est écrite deux fois. Elle ne doit pas
+ * être dérivée d'un `typeof` côté backend — le front ne compile pas le backend.
+ * Toute evolution doit être répercutée dans les deux fichiers ; les tests de
+ * `backend/test/broadcastFlow.test.mjs` verrouillent la séquence côté serveur.
+ */
+export type BroadcastStage = 'ROSTER' | 'QUESTION' | 'ANSWER_A' | 'ANSWER_B' | 'REVEAL' | 'FINAL';
+
+/**
+ * Membre d'équipe dans la forme diffusée publiquement.
+ *
+ * Trois champs, et rien d'autre : ni identifiant de participant, ni genre, ni
+ * photo, ni coordonnées. Le typage interdit ici ce que la requête
+ * `loadPublicRosters` n'exporte pas — voir `backend/src/lib/publicRoster.ts`.
+ */
+export interface PublicTeamMember {
+  firstName: string;
+  lastName: string;
+  role: string;
+}
+
+/** Position du scénario de diffusion, telle que calculée par le serveur. */
+export interface MatchBroadcast {
+  stage: BroadcastStage;
+  /** Index 0-based de la question sur laquelle se pose l'étape. */
+  questionIndex: number;
+  questionCount: number;
+  /** Rang de l'étape dans le scénario, 1-based. */
+  stepNumber: number;
+  totalSteps: number;
+  /** Une étape existe-t-elle après celle-ci ? */
+  canAdvance: boolean;
+  /** Une étape existe-t-elle avant celle-ci ? */
+  canRewind: boolean;
+  /** La bonne réponse est-elle diffusée à cette étape ? */
+  revealsAnswer: boolean;
+  /** L'effectif des équipes est-il diffusé à cette étape ? */
+  showsRoster: boolean;
+}
+
 export interface MatchItem {
   id: number;
   eventId: number;
@@ -118,8 +162,8 @@ export interface MatchItem {
   matchNumber: number;
   teamAId: number;
   teamBId: number;
-  teamA?: TeamItem;
-  teamB?: TeamItem;
+  teamA?: PublicTeamItem;
+  teamB?: PublicTeamItem;
   juryId?: number | null;
   juryName?: string | null;
   status: MatchStatus;
@@ -127,7 +171,14 @@ export interface MatchItem {
   endedAt?: string | null;
   currentQuestionIndex: number;
   currentQuestionId?: number | null;
-  currentQuestion?: QuestionItem | null;
+  /**
+   * Question affichée publiquement.
+   *
+   * `answer` n'est présent QUE si le scénario est à l'étape `REVEAL` : la
+   * réponse officielle est retirée par `publicQuestion()` sur toutes les autres
+   * étapes. Ne pas la reconstruire côté client — elle n'y est pas.
+   */
+  currentQuestion?: (QuestionItem & { answer?: string }) | null;
   scoreA: number;
   scoreB: number;
   timerSecondsLeft: number;
@@ -136,7 +187,25 @@ export interface MatchItem {
   timerDuration: number;
   activeTeamTurn?: 'team_a' | 'team_b' | 'all' | null;
   matchQuestions?: MatchQuestionItem[];
+  /** Scénario de diffusion du match — absent sur les matchs non diffusés. */
+  broadcast?: MatchBroadcast;
 }
+
+/**
+ * Équipe dans la forme renvoyée publiquement.
+ *
+ * `members` est REMPLACÉ, pas étendu : `TeamItem.members` est de type
+ * `TeamMemberItem[]`, c'est-à-dire la forme staff — elle porte l'identifiant du
+ * participant et l'objet `participant`. Un élément de ce type ne peut donc pas
+ * être affecté à un `PublicTeamItem[]`, et l'erreur de type Protège l'écran
+ * public d'y faire glisser par erreur la forme riche.
+ *
+ * Le champ n'est peuplé qu'à l'étape `ROSTER` du scénario ; voir
+ * `loadPublicRosters` côté serveur.
+ */
+export type PublicTeamItem = Omit<TeamItem, 'members'> & {
+  members?: PublicTeamMember[];
+};
 
 export interface ScoreEventItem {
   id: number;

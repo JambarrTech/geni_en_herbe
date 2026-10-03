@@ -76,11 +76,29 @@ function SondePodium() {
   return <span data-testid="podium">{noms}</span>;
 }
 
+/**
+ * Sonde l'étape du scénario de diffusion affichée au public.
+ *
+ * Sert à prouver que le message `broadcast_step` est traité comme les autres
+ * diffusions — c'est-à-dire qu'il REMPLACE l'état, au lieu d'être ignoré ou de
+ * déclencher une relecture réseau.
+ */
+function SondeDiffusion() {
+  const { liveState } = useLive();
+  const broadcast = liveState?.activeMatch?.broadcast;
+  return (
+    <span data-testid="diffusion">
+      {broadcast ? `${broadcast.stage}@${broadcast.stepNumber}/${broadcast.totalSteps}` : 'aucune'}
+    </span>
+  );
+}
+
 /** Monte le contexte et renvoie la socket, prête à diffuser. */
 function monter() {
   render(
     <LiveProvider>
       <SondePodium />
+      <SondeDiffusion />
     </LiveProvider>
   );
   const socket = FakeWebSocket.instances[0];
@@ -90,10 +108,51 @@ function monter() {
   return socket;
 }
 
-function diffuser(socket: FakeWebSocket, type: string, liveState: ReturnType<typeof etat>) {
+/**
+ * État minimal capable de contenir — ou non — un match en cours de diffusion.
+ *
+ * Le type est une union des deux constructeurs, et non `ReturnType<typeof etat>` :
+ * ce dernier fixait `activeMatch: null`, ce qui aurait fait échouer le
+ * typecheck sur toute diffusion où il y a un match à l'écran — c'est-à-dire sur
+ * toutes celles qui nous intéressent.
+ */
+type EtatDiffuse = ReturnType<typeof etat> | ReturnType<typeof matchEnDiffusion>;
+
+function diffuser(socket: FakeWebSocket, type: string, liveState: EtatDiffuse) {
   act(() => {
     socket.emit({ type, data: { liveState } });
   });
+}
+
+/**
+ * État d'un match au milieu d'une série, à l'étape de diffusion demandée.
+ *
+ * `broadcast` reproduit la forme que le serveur joint à l'état live : c'est cette
+ * forme que `LiveContext` doit laisser passer telle quelle jusqu'à l'écran.
+ */
+function matchEnDiffusion(
+  stage: 'ROSTER' | 'QUESTION' | 'ANSWER_A' | 'ANSWER_B' | 'REVEAL' | 'FINAL',
+  stepNumber: number
+) {
+  return {
+    ...etat([]),
+    activeMatch: {
+      id: 1,
+      scoreA: 20,
+      scoreB: 10,
+      broadcast: {
+        stage,
+        questionIndex: 0,
+        questionCount: 2,
+        stepNumber,
+        totalSteps: 10,
+        canAdvance: stage !== 'FINAL',
+        canRewind: stepNumber > 1,
+        revealsAnswer: stage === 'REVEAL',
+        showsRoster: stage === 'ROSTER',
+      },
+    },
+  };
 }
 
 beforeEach(() => {
@@ -151,6 +210,54 @@ describe('une diffusion qui retire un résultat du podium', () => {
     // exactement cette relecture.
     expect(getApi.mock.calls.length).toBe(lecturesAvant);
     expect(screen.getByTestId('podium')).toHaveTextContent('Alpha');
+  });
+});
+
+describe('le pilotage de la diffusion atteint l\'écran public', () => {
+  test('chaque étape diffusée remplace celle affichée', () => {
+    const socket = monter();
+
+    // Le déroulé complet d'une question. Sans ce test, l'erreur la plus probable
+    // — `broadcast_step` absent de la liste des messages à traiter — passerait
+    // inaperçue : le jury verrait son bouton changer d'état, l'écran public
+    // resterait figé sur l'effectif des équipes, et rien ne signalerait l'écart.
+    for (const [stage, step] of [
+      ['ROSTER', 1],
+      ['QUESTION', 2],
+      ['ANSWER_A', 3],
+      ['ANSWER_B', 4],
+      ['REVEAL', 5],
+      ['FINAL', 10],
+    ] as const) {
+      diffuser(socket, 'broadcast_step', matchEnDiffusion(stage, step));
+      expect(screen.getByTestId('diffusion')).toHaveTextContent(`${stage}@${step}/10`);
+    }
+  });
+
+  test('une étape de diffusion ne provoque pas de relecture réseau', () => {
+    const socket = monter();
+    const getApi = vi.mocked(api.get);
+    const lecturesAvant = getApi.mock.calls.length;
+
+    diffuser(socket, 'broadcast_step', matchEnDiffusion('REVEAL', 5));
+
+    // La position du scénario fait partie de l'état : elle arrive avec le
+    // message. Une relecture ici serait d'autant plus Vicieuse que la décision
+    // elle-même — ce que le public a le droit de voir — a déjà été prise côté
+    // serveur.
+    expect(getApi.mock.calls.length).toBe(lecturesAvant);
+    expect(screen.getByTestId('diffusion')).toHaveTextContent('REVEAL@5/10');
+  });
+
+  test('un type inconnu ne fait pas non plus bouger le scénario', () => {
+    const socket = monter();
+
+    diffuser(socket, 'broadcast_step', matchEnDiffusion('ANSWER_A', 3));
+    // N'importe quel autre événement ne doit pas réécrire l'étape affichée :
+    // l'écran public ne se resynchronise que sur ce que le serveur a décidé.
+    diffuser(socket, 'evenement_inconnu', matchEnDiffusion('FINAL', 10));
+
+    expect(screen.getByTestId('diffusion')).toHaveTextContent('ANSWER_A@3/10');
   });
 });
 
