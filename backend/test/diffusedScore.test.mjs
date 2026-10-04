@@ -47,9 +47,16 @@ test('les événements d’équipes inconnues sont ignorés', () => {
   assert.equal(scoreB, 0);
 });
 
-test('match terminé : jamais masqué, même sans diffusion', () => {
-  assert.equal(isScoreHidden('FINISHED', [1, 2], null), false);
-  assert.equal(isScoreHidden('FINISHED', [1, 2], 1), false);
+test('match terminé : masqué tant que tout n’est pas diffusé (pas de diffusion auto)', () => {
+  // Clôturer ne diffuse rien : sans cette règle, le bouton « Clôturer »
+  // publierait les totaux sans décision explicite du jury.
+  assert.equal(isScoreHidden('FINISHED', [1, 2], null), true);
+  assert.equal(isScoreHidden('FINISHED', [1, 2], 1), true);
+  assert.equal(isScoreHidden('FINISHED', [1, 2], 2), false);
+});
+
+test('match terminé sans point : 0-0 affiché, rien à cacher', () => {
+  assert.equal(isScoreHidden('FINISHED', [], null), false);
 });
 
 test('aucun point attribué : 0-0 affiché, rien à cacher', () => {

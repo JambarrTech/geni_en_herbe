@@ -461,3 +461,50 @@ describe('bascule automatique de l effectif', () => {
     expect(screen.queryByTestId('roster-auto-advance')).toBeNull();
   });
 });
+
+describe('JuryDashboard — diffusion manuelle du résultat', () => {
+  const detailFinal = (scoresHidden: boolean) =>
+    makeDetail({
+      status: 'FINISHED',
+      scoresHidden,
+      broadcast: {
+        stage: 'FINAL',
+        questionIndex: 7,
+        questionCount: 8,
+        stepNumber: 33,
+        totalSteps: 33,
+        canAdvance: false,
+        canRewind: true,
+        revealsAnswer: false,
+        showsRoster: false,
+        rosterUntil: null,
+      },
+    });
+
+  it('propose « Diffuser le résultat » tant que l’écran public masque', async () => {
+    // Ni l’étape FINAL ni la clôture ne diffusent par elles-mêmes : sans ce
+    // bouton, les totaux resteraient masqués à jamais (aucune interface
+    // n’appelait encore POST /diffuse-score).
+    const { post } = await mountReady(detailFinal(true));
+
+    const btn = byId('btn-match-diffuse-result');
+    expect(btn).not.toBeDisabled();
+    expect(btn).toHaveTextContent('Diffuser le résultat');
+
+    fireEvent.click(btn);
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    expect(post.mock.calls[0][0]).toBe('/api/matches/5/diffuse-score');
+  });
+
+  it('bouton absent pendant le match, avant l’étape FINAL', async () => {
+    await mountReady();
+    expect(document.getElementById('btn-match-diffuse-result')).toBeNull();
+  });
+
+  it('bouton inactif quand le résultat est déjà diffusé', async () => {
+    await mountReady(detailFinal(false));
+    const btn = byId('btn-match-diffuse-result');
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveTextContent('Résultat diffusé');
+  });
+});

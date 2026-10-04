@@ -359,8 +359,49 @@ export const LiveCompetitionPage: React.FC = () => {
    * le match est encore en cours — le jury peut encore corriger — puis une fois
    * le match cloture, tant qu'aucun autre match ne prend la main. Le libelle
    * change en consequence : « officiel » n'apparait qu'a la cloture.
+   *
+   * Aucune diffusion automatique : tant que le jury n'a pas diffusé le
+   * résultat (bouton « Diffuser le résultat »), l'écran affiche l'attente —
+   * jamais des totaux partiels qui passeraient pour définitifs.
    */
   const FinalScoreScreen = ({ official }: { official: boolean }) => {
+    if (activeMatch?.scoresHidden === true) {
+      return (
+        <>
+          <Badge tone="accent" className="px-3.5 py-1.5 text-xs">
+            {official ? (
+              <>
+                <Trophy className="h-3.5 w-3.5" aria-hidden="true" />
+                Match officiellement terminé
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+                Dernière question passée
+              </>
+            )}
+          </Badge>
+
+          <h2 className="text-balance text-3xl font-bold tracking-tight text-white sm:text-4xl">
+            Résultat en cours de validation
+          </h2>
+
+          <p className="mx-auto max-w-2xl text-balance text-center text-xl text-slate-300 sm:text-2xl">
+            Le jury vérifie les scores avant de les proclamer.
+          </p>
+
+          <div className="mx-auto mt-2 max-w-xl rounded-2xl border border-amber-400/30 bg-amber-400/10 p-5">
+            <p className="text-sm font-semibold text-amber-200">
+              Génie en Herbe — délibérations en cours
+            </p>
+            <p className="mt-1.5 text-pretty text-xs leading-relaxed text-slate-300">
+              Merci aux participants. Les résultats officiels et le classement général seront
+              proclamés dès validation par le jury et l'administration de l'AEERKS.
+            </p>
+          </div>
+        </>
+      );
+    }
     const winner =
       activeMatch!.scoreA === activeMatch!.scoreB
         ? null

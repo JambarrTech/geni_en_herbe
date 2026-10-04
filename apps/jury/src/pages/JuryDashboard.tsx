@@ -33,6 +33,7 @@ import {
   Tv,
   SkipForward,
   Rewind,
+  Megaphone,
 } from 'lucide-react';
 import type { BroadcastStage, MatchBroadcast } from '@shared/types.ts';
 
@@ -507,6 +508,24 @@ export const JuryDashboard: React.FC = () => {
     setConfirmClose(true);
   };
 
+  /**
+   * Diffusion manuelle du résultat à l'écran public.
+   *
+   * Ni l'étape FINAL ni la clôture ne diffusent par elles-mêmes : sans ce
+   * geste explicite, les totaux restent masqués (l'écran final affiche
+   * l'attente, pas des chiffres). La route diffuse le dernier événement de
+   * score, donc le marqueur rattrape tout le journal d'un coup.
+   */
+  const handleDiffuseResult = useCallback(() => {
+    if (selectedMatchId == null) return;
+    void runAction('Diffusion du résultat', async () => {
+      await api.post(`/api/matches/${selectedMatchId}/diffuse-score`, {});
+      showFeedback('Résultat diffusé à l’écran public.');
+      await loadMatchDetails(selectedMatchId);
+      void refreshLiveState();
+    });
+  }, [selectedMatchId, runAction, showFeedback, loadMatchDetails, refreshLiveState]);
+
   const currentQ: (QuestionItem & { categoryName?: string }) | null =
     matchDetails?.currentQuestion ?? null;
   const matchQuestionsList = matchDetails?.matchQuestions ?? [];
@@ -978,6 +997,29 @@ export const JuryDashboard: React.FC = () => {
                         Clôturer le match
                       </button>
                     )}
+
+                  {(broadcastStage === 'FINAL' || matchDetails.status === 'FINISHED') &&
+                    matchDetails.status !== 'CANCELLED' && (
+                      <button
+                        id="btn-match-diffuse-result"
+                        type="button"
+                        disabled={actionLoading || matchDetails.scoresHidden !== true}
+                        onClick={handleDiffuseResult}
+                        title={
+                          matchDetails.scoresHidden === true
+                            ? 'Afficher les scores finaux sur l’écran public (aucune diffusion automatique)'
+                            : 'Scores déjà diffusés : toute correction ultérieure les masquera à nouveau'
+                        }
+                        className="w-full py-2 px-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold shadow-xs flex items-center justify-center gap-1.5 disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-1"
+                      >
+                        <Megaphone className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>
+                          {matchDetails.scoresHidden === true
+                            ? 'Diffuser le résultat'
+                            : 'Résultat diffusé'}
+                        </span>
+                      </button>
+                    )}
                 </div>
               </div>
 
@@ -1218,7 +1260,9 @@ export const JuryDashboard: React.FC = () => {
                           : broadcastStage === 'ANSWER_A' || broadcastStage === 'ANSWER_B'
                             ? `La prise de parole de l'équipe ${broadcastStage === 'ANSWER_A' ? 'A' : 'B'}.`
                             : broadcastStage === 'FINAL'
-                              ? 'Le score final des deux équipes.'
+                              ? matchDetails.scoresHidden === true
+                                ? 'Le score final est en attente de diffusion (bouton « Diffuser le résultat »).'
+                                : 'Le score final des deux équipes.'
                               : currentQ
                                 ? `L'énoncé de la question ${(broadcast?.questionIndex ?? currentIdx) + 1}, sans sa réponse.`
                                 : 'L\'écran d\'attente, le jury prépare la suite.'}

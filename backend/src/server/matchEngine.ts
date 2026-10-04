@@ -510,19 +510,22 @@ export function sumEventsUpTo(
 /**
  * L'écran public doit-il masquer les scores de ce match ?
  *
- * - match terminé : non, les totaux réels sont affichés (l'écran de fin et
- *   la publication officielle prennent le relais) ;
  * - aucun point attribué : non, 0-0 n'a rien à cacher ;
  * - sinon : seulement si chaque point attribué a été diffusé. Un seul
  *   événement postérieur au marqueur, et l'écran masque — c'est le jury qui
  *   décide du moment, pas l'attribution.
+ *
+ * Y compris après clôture (`FINISHED`) : clôturer un match ne diffuse rien
+ * par lui-même. Sans cela, le bouton « Clôturer » publierait les totaux sans
+ * décision explicite, et l'étape FINAL perdrait son sens (elle resterait
+ * masquée pendant que le match clôturé afficherait tout).
  */
 export function isScoreHidden(
   status: string,
   eventIds: number[],
   diffusedEventId: number | null
 ): boolean {
-  if (status === FLOW.MATCH_STATUS.FINISHED) return false;
+  void status;
   if (eventIds.length === 0) return false;
   if (diffusedEventId == null) return true;
   return eventIds.some((id) => id > diffusedEventId);
@@ -768,12 +771,12 @@ export async function getLiveState(eventId?: number, includeRankings = false): P
       if (teamB) teamBOut = { ...teamB, members: rosters.get(teamB.id) ?? [] };
     }
 
-    // Points visibles par le public : JAMAIS les totaux en direct pendant le
-    // match. Seuls les points diffusés par le jury (ou l'admin) partent sur
-    // l'écran — voir `diffused_score_event_id` (migration 0009). Un point
-    // attribué puis non diffusé reste invisible : le marqueur prend du retard
-    // et l'écran montre les derniers totaux approuvés, ou masque tout s'il
-    // n'y en a aucun.
+    // Points visibles par le public : JAMAIS les totaux en direct, ni pendant
+    // le match ni après clôture. Seuls les points diffusés par le jury (ou
+    // l'admin, bouton « Diffuser le résultat ») partent sur l'écran — voir
+    // `diffused_score_event_id` (migration 0009). Un point attribué puis non
+    // diffusé reste invisible : le marqueur prend du retard et l'écran montre
+    // les derniers totaux approuvés, ou masque tout s'il n'y en a aucun.
     const publicEvents = await db
       .select({ id: scoreEvents.id, teamId: scoreEvents.teamId, points: scoreEvents.points })
       .from(scoreEvents)
@@ -845,14 +848,49 @@ const upcomingMatches = allMatches
 const winnerTeamId = (m: { teamAId: number; teamBId: number; scoreA: number; scoreB: number }) =>
     m.scoreA > m.scoreB ? m.teamAId : m.scoreB > m.scoreA ? m.teamBId : null;
 
-  const completedMatches = allMatches
-    .filter((m) => m.status === FLOW.MATCH_STATUS.FINISHED)
-    .map((m) => ({
+  // Les matchs clôturés suivent la même règle que le match en cours : leurs
+  // totaux ne partent sur l'écran public que si le jury les a diffusés.
+  // Sans cela, `/api/live` (public) exposerait les résultats définitifs dès
+  // la clôture, contournant le bouton « Diffuser le résultat » — y compris
+  // via `winnerTeamId`, qui désigne le vainqueur à lui seul.
+  const completedRaw = allMatches.filter((m) => m.status === FLOW.MATCH_STATUS.FINISHED);
+  const completedIds = completedRaw.map((m) => m.id);
+  const completedEvents =
+    completedIds.length > 0
+      ? await db
+          .select({
+            id: scoreEvents.id,
+            matchId: scoreEvents.matchId,
+            teamId: scoreEvents.teamId,
+            points: scoreEvents.points,
+          })
+          .from(scoreEvents)
+          .where(inArray(scoreEvents.matchId, completedIds))
+      : [];
+  const eventsByMatch = new Map<number, typeof completedEvents>();
+  for (const e of completedEvents) {
+    if (!eventsByMatch.has(e.matchId)) eventsByMatch.set(e.matchId, []);
+    eventsByMatch.get(e.matchId)!.push(e);
+  }
+
+  const completedMatches = completedRaw.map((m) => {
+    const evs = eventsByMatch.get(m.id) ?? [];
+    const hidden = isScoreHidden(
+      m.status,
+      evs.map((e) => e.id),
+      m.diffusedScoreEventId ?? null
+    );
+    const approved = sumEventsUpTo(evs, m.diffusedScoreEventId ?? null, m.teamAId, m.teamBId);
+    return {
       ...m,
       teamA: enrichTeam(teamMap.get(m.teamAId)),
       teamB: enrichTeam(teamMap.get(m.teamBId)),
-      winnerTeamId: winnerTeamId(m),
-    }));
+      scoreA: hidden ? approved.scoreA : m.scoreA,
+      scoreB: hidden ? approved.scoreB : m.scoreB,
+      scoresHidden: hidden,
+      winnerTeamId: hidden ? null : winnerTeamId(m),
+    };
+  });
 
   const rankings = includeRankings ? await calculateRankings(evId) : [];
 

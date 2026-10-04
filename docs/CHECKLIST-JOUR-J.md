@@ -42,8 +42,12 @@ d'arrêt : si elle échoue, on ne passe pas à la suivante.
    ni annonce — seule la diapositive de la question reste affichée.
 4. Avancer/reculer avec « Étape suivante » : la diapositive change sur
    l'écran public (question suivante/précédente).
-5. Révéler une réponse, passer à l'étape FINAL : les scores finaux
-   apparaissent. Clôturer le match.
+5. Révéler une réponse, passer à l'étape FINAL : l'écran public affiche
+   « Résultat en cours de validation », PAS les scores (aucune diffusion
+   automatique). Diffuser avec le bouton jury « Diffuser le résultat » :
+   les scores finaux apparaissent. Clôturer le match (la clôture ne diffuse
+   rien non plus : un résultat corrigé après diffusion se masque à nouveau
+   jusqu'à la prochaine diffusion).
 4. Vérifier le podium général ET le podium par catégorie (onglet Résultats).
 5. Publier puis masquer les résultats (bouton officiel).
 6. Supprimer ou annuler le match test (ne pas fausser le classement du soir).

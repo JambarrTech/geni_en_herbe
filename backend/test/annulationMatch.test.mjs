@@ -291,8 +291,17 @@ describe('annulation — les dépendances déjà en place', () => {
     const source = readFileSync(join(SRC, 'server', 'matchEngine.ts'), 'utf8');
     assert.match(
       source,
-      /const completedMatches = allMatches\s*\.filter\(\(m\) => m\.status === FLOW\.MATCH_STATUS\.FINISHED\)/,
+      /const completedRaw = allMatches\.filter\(\(m\) => m\.status === FLOW\.MATCH_STATUS\.FINISHED\)/,
       'les matchs terminés ne sont plus filtrés : un match annulé resterait affiché au public'
+    );
+    // Les résultats clôturés restent masqués tant que le jury ne les diffuse
+    // pas : le filtre seul ne suffit plus, le masquage suit la même règle que
+    // le match en cours (sinon `/api/live` exposerait les totaux définitifs
+    // dès la clôture, bouton « Diffuser le résultat » contourné).
+    assert.match(
+      source,
+      /winnerTeamId: hidden \? null : winnerTeamId\(m\)/,
+      'les matchs clôturés affichent le vainqueur sans diffusion : la fin de match redevient automatique'
     );
   });
 });

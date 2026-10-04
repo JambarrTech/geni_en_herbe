@@ -1378,27 +1378,17 @@ matchesRouter.post('/:id/broadcast-step', requireAuth, requireJuryOrAdmin, contr
       duration
     );
 
-    // Passer à l'étape FINAL, c'est montrer le score final : le jury qui avance
-    // jusque-là diffuse les totaux par le même geste — sinon l'écran final
-    // resterait masqué alors qu'on lui demande le résultat.
-    let finalDiffusedEventId: number | null | undefined;
-    if (target.stage === BROADCAST_STAGE.FINAL) {
-      const [latest] = await db
-        .select({ id: scoreEvents.id })
-        .from(scoreEvents)
-        .where(eq(scoreEvents.matchId, id))
-        .orderBy(desc(scoreEvents.id))
-        .limit(1);
-      if (latest) finalDiffusedEventId = latest.id;
-    }
-
+    // PAS de diffusion automatique à l'étape FINAL : c'est le jury qui diffuse
+    // le résultat, explicitement, via `POST /:id/diffuse-score` (bouton
+    // « Diffuser le résultat »). L'écran final reste masqué tant que le
+    // marqueur n'a pas rattrapé le dernier événement — sinon le simple fait
+    // d'avancer le scénario publierait les totaux sans décision.
     const [updated] = await db
       .update(matches)
       .set({
         broadcastStage: target.stage,
         // Plus d'étape ROSTER : pas d'échéance de bascule automatique.
         broadcastRosterUntil: null,
-        ...(finalDiffusedEventId !== undefined ? { diffusedScoreEventId: finalDiffusedEventId } : {}),
         ...(questionChanged
           ? {
               currentQuestionIndex: target.questionIndex,
