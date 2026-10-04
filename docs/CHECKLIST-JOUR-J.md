@@ -53,6 +53,9 @@ d'arrêt : si elle échoue, on ne passe pas à la suivante.
 - Un seul match `LIVE` à la fois (l'API le refuse sinon).
 - Règle d'arbitrage : **le podium par catégorie est indicatif, seul le total
   du match fait foi** (pénalités non planchées par catégorie).
+- **Bonus et réplique figent la question** : n'attribuez un ★ Bonus qu'APRÈS
+  la (bonne ou mauvaise) réponse — posé avant, il verrouille la question et
+  la bonne réponse devient impossible sans ajustement manuel.
 - En cas de doute sur un score : ne pas supprimer, **annuler** le résultat
   (l'audit est conservé, le rétablissement reste possible).
 

@@ -19,7 +19,10 @@ export const CONFIG = {
   MAX_ADJUST_POINTS: 1000,
 
   // --- Équipes ---
-  DEFAULT_MAX_TEAM_MEMBERS: 4,
+  DEFAULT_MAX_TEAM_MEMBERS: 5,
+  // Composition réglementaire : une équipe, c'est EXACTEMENT 5 membres — ni
+  // plus (plafond ci-dessus), ni moins (vérifié au lancement du match).
+  REQUIRED_TEAM_MEMBERS: 5,
 
   // --- Auth & sessions ---
   MAX_LOGIN_ATTEMPTS: 5,

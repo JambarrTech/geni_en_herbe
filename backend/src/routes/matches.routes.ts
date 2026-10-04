@@ -6,6 +6,7 @@ import {
   questions,
   categories,
   teams,
+  teamMembers,
   users,
   scoreEvents,
   events,
@@ -331,6 +332,25 @@ matchesRouter.post('/:id/start', requireAuth, requireJuryOrAdmin, controlLimit, 
     const otherLive = concurrent.find((m) => m.id !== id);
     if (otherLive) {
       return res.status(400).json({ error: 'Un autre match est déjà en cours sur cet événement' });
+    }
+
+    // Composition réglementaire : chaque équipe aligne EXACTEMENT 5 membres.
+    // Vérifié au lancement — pas à la programmation — pour laisser le comité
+    // composer les équipes jusqu'au dernier moment, tout en interdisant un
+    // match incomplet ou inéquitable.
+    const [teamA] = await db.select().from(teams).where(eq(teams.id, match.teamAId));
+    const [teamB] = await db.select().from(teams).where(eq(teams.id, match.teamBId));
+    for (const t of [teamA, teamB]) {
+      if (!t) return res.status(400).json({ error: 'Équipe du match introuvable' });
+      const members = await db
+        .select({ id: teamMembers.id })
+        .from(teamMembers)
+        .where(eq(teamMembers.teamId, t.id));
+      if (members.length !== CONFIG.REQUIRED_TEAM_MEMBERS) {
+        return res.status(400).json({
+          error: `L'équipe ${t.name} est incomplète (${members.length}/${CONFIG.REQUIRED_TEAM_MEMBERS} membres) : un match exige deux équipes de ${CONFIG.REQUIRED_TEAM_MEMBERS}.`,
+        });
+      }
     }
 
     // La durée par défaut vient de la configuration de compétition

@@ -79,6 +79,10 @@ test('les constantes métier restent cohérentes', () => {
   // sinon l'interface se déverrouille avant la fin de la protection.
   assert.ok(CONFIG.ANTI_DOUBLE_CLICK_MS >= 1500);
   assert.ok(CONFIG.WS_MAX_PAYLOAD_BYTES > 0);
+  // Composition réglementaire : 5 membres exactement, et un plafond qui ne
+  // doit jamais empêcher de compléter une équipe.
+  assert.equal(CONFIG.REQUIRED_TEAM_MEMBERS, 5);
+  assert.ok(CONFIG.DEFAULT_MAX_TEAM_MEMBERS >= CONFIG.REQUIRED_TEAM_MEMBERS);
 });
 
 test('les enums de statuts sont cohérents entre eux', () => {

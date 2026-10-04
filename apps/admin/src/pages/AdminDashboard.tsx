@@ -1046,7 +1046,7 @@ export const AdminDashboard: React.FC = () => {
                 <div className="text-3xl font-bold tabular-nums text-[#0B3B82] mt-2">
                   {teamsList.length}
                 </div>
-                <div className="text-[11px] text-slate-400 mt-1">4 membres par équipe</div>
+                <div className="text-[11px] text-slate-400 mt-1">5 membres par équipe, ni plus ni moins</div>
               </div>
 
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
@@ -1487,6 +1487,14 @@ export const AdminDashboard: React.FC = () => {
                     <span className="text-xs font-semibold uppercase px-2.5 py-1 rounded-md bg-blue-50 text-[#0B3B82]">
                       {t.code}
                     </span>
+                    {(t.members?.length || 0) !== 5 && (
+                      <span
+                        title="Un match exige deux équipes de 5 membres exactement"
+                        className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-rose-100 text-rose-800"
+                      >
+                        Incomplète ({t.members?.length || 0}/5)
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-start justify-between gap-2">
                     <h4 className="text-base font-bold text-slate-900">{t.name}</h4>
@@ -1499,7 +1507,7 @@ export const AdminDashboard: React.FC = () => {
 
                   <div className="mt-4 pt-3 border-t border-slate-100">
                     <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
-                      Membres de l'équipe ({t.members?.length || 0}/4)
+                      Membres de l'équipe ({t.members?.length || 0}/5)
                     </div>
                     <div className="space-y-1.5">
                       {t.members && t.members.length > 0 ? (
@@ -2276,8 +2284,13 @@ export const AdminDashboard: React.FC = () => {
                 {/* Current members */}
                 <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl mb-3">
                   <div className="px-3.5 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-400 bg-slate-50 rounded-t-xl">
-                    Membres actuels ({selectedTeamForMembers.members?.length || 0}/4)
+                    Membres actuels ({selectedTeamForMembers.members?.length || 0}/5)
                   </div>
+                  {(selectedTeamForMembers.members?.length || 0) !== 5 && (
+                    <div className="px-3.5 py-2 text-[11px] font-semibold text-rose-700 bg-rose-50 border-b border-rose-100">
+                      Équipe incomplète : un match exige exactement 5 membres.
+                    </div>
+                  )}
                   {selectedTeamForMembers.members && selectedTeamForMembers.members.length > 0 ? (
                     selectedTeamForMembers.members.map((m) => (
                       <div key={m.id} className="px-3.5 py-2.5 flex items-center justify-between text-xs">
