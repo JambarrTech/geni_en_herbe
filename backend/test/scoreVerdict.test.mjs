@@ -74,10 +74,15 @@ describe('autoStageForVerdict — ce qui ne doit pas bouger l’écran', () => {
   });
 
   test('verdict tardif (déjà révélé, final) : on ne recule jamais l’écran', () => {
-    for (const stage of ['REVEAL', 'FINAL', 'ROSTER', 'INCONNUE']) {
+    for (const stage of ['REVEAL', 'FINAL', 'INCONNUE']) {
       assert.equal(verdict(stage, 10), null, `bonne à ${stage}`);
       assert.equal(verdict(stage, 0), null, `faux à ${stage}`);
     }
+  });
+
+  test('ligne ROSTER historique : jugée comme QUESTION (migration 0011)', () => {
+    assert.equal(verdict('ROSTER', 10), 'REVEAL');
+    assert.equal(verdict('ROSTER', 0), 'ANSWER_B');
   });
 });
 

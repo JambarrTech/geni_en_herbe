@@ -242,15 +242,20 @@ export function autoStageForVerdict(input: {
   isCurrentQuestion: boolean;
 }): BroadcastStage | null {
   if (!input.isCurrentQuestion) return null;
+  // `ROSTER` historique vaut `QUESTION` : comme `normalizeCursor`, on juge
+  // l'étape effective, pas la valeur fossile — sinon les matchs créés avant
+  // la migration 0011 ignoreraient le verdict.
+  const effective =
+    input.stage === BROADCAST_STAGE.ROSTER ? BROADCAST_STAGE.QUESTION : input.stage;
   if (
-    input.stage !== BROADCAST_STAGE.QUESTION &&
-    input.stage !== BROADCAST_STAGE.ANSWER_A &&
-    input.stage !== BROADCAST_STAGE.ANSWER_B
+    effective !== BROADCAST_STAGE.QUESTION &&
+    effective !== BROADCAST_STAGE.ANSWER_A &&
+    effective !== BROADCAST_STAGE.ANSWER_B
   ) {
     return null;
   }
   if (input.points > 0) return BROADCAST_STAGE.REVEAL;
-  return input.stage === BROADCAST_STAGE.ANSWER_B
+  return effective === BROADCAST_STAGE.ANSWER_B
     ? BROADCAST_STAGE.REVEAL
     : BROADCAST_STAGE.ANSWER_B;
 }
