@@ -198,57 +198,6 @@ export const LiveCompetitionPage: React.FC = () => {
   );
 
   /**
-   * Scores masqués : des points ont été attribués depuis la dernière diffusion
-   * du jury, donc l'écran ne montre aucun total — seulement les noms, pour que
-   * la salle sache que la rencontre continue sans voir ce qu'elle ne doit pas.
-   */
-  const MaskedScorePanel = () => (
-    <div className="rounded-2xl border border-white/12 bg-slate-900/40 p-5 sm:p-7 text-center">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-        {activeMatch?.teamA?.name ?? 'Équipe A'} contre {activeMatch?.teamB?.name ?? 'Équipe B'}
-      </p>
-      <p
-        role="status"
-        className="mx-auto mt-4 max-w-xl text-balance text-xl font-bold text-white sm:text-2xl"
-      >
-        Scores masqués — le jury diffusera les points attribués
-      </p>
-      <p className="mx-auto mt-2 max-w-xl text-pretty text-xs leading-relaxed text-slate-400">
-        La rencontre continue : les totaux s'afficheront dès leur diffusion.
-      </p>
-    </div>
-  );
-
-  /**
-   * Annonce des points diffusés par le jury : la dernière attribution que la
-   * salle a le droit de voir (équipe, points, motif). N'apparaît que sur
-   * diffusion explicite — jamais automatiquement à l'attribution.
-   */
-  const DiffusedScoreBanner = () => {
-    const d = activeMatch?.diffusedScore;
-    if (!d) return null;
-    return (
-      <div
-        role="status"
-        className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 rounded-2xl border border-amber-400/40 bg-amber-400/10 px-5 py-4 text-center"
-      >
-        <span className="text-2xl font-bold tabular-nums text-amber-200 sm:text-3xl">
-          {d.points > 0 ? '+' : ''}{d.points} pts
-        </span>
-        <span className="text-sm font-bold text-white">
-          {d.teamName}
-          {d.questionIndex != null && (
-            <span className="font-semibold text-slate-300">
-              {' '}· question {d.questionIndex + 1}
-            </span>
-          )}
-        </span>
-        <span className="w-full text-xs font-medium text-slate-300">{d.reason}</span>
-      </div>
-    );
-  };
-
-  /**
    * Colonne d'effectif pour une equipe.
    *
    * Seuls prenom et nom sont affiches — c'est tout ce que le serveur envoie
@@ -717,103 +666,35 @@ export const LiveCompetitionPage: React.FC = () => {
           <section id="screen-match-live" className="space-y-5">
             {activeMatch.status === 'PAUSED' && PausedBanner}
 
-            {/* Totaux masqués tant que le jury n'a pas diffusé les points
-                attribués : seule la dernière diffusion est montrable. */}
-            {activeMatch.scoresHidden ? (
-              <MaskedScorePanel />
-            ) : (
-              <div className="grid grid-cols-1 items-center gap-5 md:grid-cols-12">
-              <div className="md:col-span-5">
-                <TeamScoreCard
-                  team={activeMatch.teamA}
-                  score={activeMatch.scoreA}
-                  accent="a"
-                  highlight={answerTurn === 'a'}
-                />
-              </div>
-
-              {/* Chrono */}
-              <div className="flex flex-col items-center justify-center md:col-span-2">
-                <div
-                  role="timer"
-                  aria-label={`Chronomètre : ${timerLeft} secondes`}
-                  className={[
-                    'flex h-32 w-32 flex-col items-center justify-center rounded-full border-2 sm:h-36 sm:w-36',
-                    'transition-colors duration-300 motion-reduce:transition-none',
-                    timerRunning
-                      ? timerLeft <= APP_CONFIG.TIMER_WARNING_SECONDS
-                        ? 'animate-pulse border-rose-400 bg-rose-500/15 text-rose-200 motion-reduce:animate-none'
-                        : 'border-amber-400/70 bg-amber-400/10 text-amber-200'
-                      : 'border-white/15 bg-slate-900/40 text-slate-400',
-                  ].join(' ')}
-                >
-                  <span className="text-5xl font-bold tabular-nums tracking-tight sm:text-6xl">
-                    {timerLeft}
-                  </span>
-                  <span className="text-[10px] font-semibold uppercase tracking-[0.14em] opacity-70">
-                    sec
-                  </span>
-                </div>
-                <span className="mt-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                  Chronomètre
-                </span>
-              </div>
-
-              <div className="md:col-span-5">
-                <TeamScoreCard
-                  team={activeMatch.teamB}
-                  score={activeMatch.scoreB}
-                  accent="b"
-                  highlight={answerTurn === 'b'}
-                />
-              </div>
-              </div>
-            )}
-
-            {/* Dernière annonce de points diffusée par le jury. Absente tant
-                que rien n'est diffusé — et masquée avec les scores sinon. */}
-            {activeMatch.diffusedScore && !activeMatch.scoresHidden && (
-              <DiffusedScoreBanner />
-            )}
-
-            {/* Prise de parole : surbrillance de l'équipe, sans le libellé de ce
-                qu'elle a répondu — le jury statue, l'écran montre qui parle. */}
-            {answerTurn && (
-              <AnswerTurnBanner
-                team={answerTurn === 'a' ? activeMatch.teamA : activeMatch.teamB}
-                accent={answerTurn}
-              />
-            )}
-
-            {/* Question lue aux candidats. La réponse n'est jointe qu'à l'étape
-                REVEAL — et affichée plus bas, après l'énoncé. */}
+            {/* Diaporama piloté par le jury : UNE question à la fois, centrée
+                comme une diapositive. Le jury avance et recule (« Étape
+                suivante ») ; aucun point ne s’affiche pendant le match —
+                ni totaux, ni annonces. Seul le chrono accompagne. */}
             {currentQ ? (
-              <div className="rounded-2xl border border-white/12 bg-slate-900/50 p-5 sm:p-7">
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge
-                      tone="primary"
-                      className="border-[#2563EB]/40 bg-[#2563EB]/20 text-blue-100"
-                    >
-                      Question {(broadcast?.questionIndex ?? activeMatch.currentQuestionIndex) + 1}
+              <div className="flex min-h-[52vh] flex-col justify-center rounded-2xl border border-white/12 bg-slate-900/50 p-5 sm:p-10">
+                <div className="mb-6 flex flex-wrap items-center justify-center gap-2">
+                  <Badge
+                    tone="primary"
+                    className="border-[#2563EB]/40 bg-[#2563EB]/20 text-blue-100"
+                  >
+                    Question {(broadcast?.questionIndex ?? activeMatch.currentQuestionIndex) + 1}
+                  </Badge>
+                  {currentQ.categoryName && (
+                    <Badge className="border-white/15 bg-white/5 text-slate-200">
+                      {currentQ.categoryName}
                     </Badge>
-                    {currentQ.categoryName && (
-                      <Badge className="border-white/15 bg-white/5 text-slate-200">
-                        {currentQ.categoryName}
-                      </Badge>
-                    )}
-                  </div>
+                  )}
                   <Badge tone="accent" className="px-3 py-1">
                     {currentQ.points} points en jeu
                   </Badge>
                 </div>
 
-                <p className="text-pretty text-center text-xl font-semibold leading-relaxed text-white sm:text-2xl lg:text-3xl">
+                <p className="text-balance text-center text-2xl font-bold leading-snug text-white sm:text-4xl lg:text-5xl">
                   {currentQ.text}
                 </p>
 
                 {currentQ.options && Array.isArray(currentQ.options) && (
-                  <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="mx-auto mt-8 grid w-full max-w-3xl grid-cols-1 gap-3 sm:grid-cols-2">
                     {currentQ.options.map((opt, i) => (
                       <div
                         key={i}
@@ -838,6 +719,42 @@ export const LiveCompetitionPage: React.FC = () => {
                   Aucune question affichée — le jury prépare la suite.
                 </p>
               </div>
+            )}
+
+            {/* Chrono : le seul chiffre du match affiché pendant les questions. */}
+            <div className="flex flex-col items-center justify-center">
+              <div
+                role="timer"
+                aria-label={`Chronomètre : ${timerLeft} secondes`}
+                className={[
+                  'flex h-32 w-32 flex-col items-center justify-center rounded-full border-2 sm:h-36 sm:w-36',
+                  'transition-colors duration-300 motion-reduce:transition-none',
+                  timerRunning
+                    ? timerLeft <= APP_CONFIG.TIMER_WARNING_SECONDS
+                      ? 'animate-pulse border-rose-400 bg-rose-500/15 text-rose-200 motion-reduce:animate-none'
+                      : 'border-amber-400/70 bg-amber-400/10 text-amber-200'
+                    : 'border-white/15 bg-slate-900/40 text-slate-400',
+                ].join(' ')}
+              >
+                <span className="text-5xl font-bold tabular-nums tracking-tight sm:text-6xl">
+                  {timerLeft}
+                </span>
+                <span className="text-[10px] font-semibold uppercase tracking-[0.14em] opacity-70">
+                  sec
+                </span>
+              </div>
+              <span className="mt-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                Chronomètre
+              </span>
+            </div>
+
+            {/* Prise de parole : surbrillance de l’équipe, sans le libellé de ce
+                qu'elle a répondu — le jury statue, l'écran montre qui parle. */}
+            {answerTurn && (
+              <AnswerTurnBanner
+                team={answerTurn === 'a' ? activeMatch.teamA : activeMatch.teamB}
+                accent={answerTurn}
+              />
             )}
 
             {/* Révélation : n'est rendue qu'à l'étape REVEAL, et `answer` n'est

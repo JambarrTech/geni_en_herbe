@@ -284,13 +284,12 @@ export const JuryDashboard: React.FC = () => {
       if (!prev) return prev;
       const liveM = liveState.activeMatch;
       if (!liveM) return prev;
-      // Quand l'écran masque les scores, les totaux du live ne sont pas les
-      // vrais : les comparer forcerait un nouveau rendu à chaque message.
+      // L'état live porte les totaux PUBLICS, masqués pendant le match : on
+      // ne les fusionne que quand ils sont montrés, sinon la table du jury
+      // afficherait des totaux masqués au lieu des vrais scores.
       const scoresEqual =
         liveM.scoresHidden === true ||
         (prev.scoreA === liveM.scoreA && prev.scoreB === liveM.scoreB);
-      const prevDiffusedId = prev.diffusedScore?.eventId ?? null;
-      const liveDiffusedId = liveM.diffusedScore?.eventId ?? null;
       if (
         scoresEqual &&
         prev.timerSecondsLeft === liveM.timerSecondsLeft &&
@@ -298,8 +297,7 @@ export const JuryDashboard: React.FC = () => {
         prev.currentQuestionId === liveM.currentQuestionId &&
         prev.currentQuestionIndex === liveM.currentQuestionIndex &&
         prev.broadcast?.stage === liveM.broadcast?.stage &&
-        (prev.scoresHidden ?? false) === (liveM.scoresHidden ?? false) &&
-        prevDiffusedId === liveDiffusedId
+        (prev.scoresHidden ?? false) === (liveM.scoresHidden ?? false)
       ) {
         return prev; // Pas de changement significatif
       }
@@ -310,14 +308,10 @@ export const JuryDashboard: React.FC = () => {
         currentQuestionId: liveM.currentQuestionId ?? prev.currentQuestionId,
         currentQuestionIndex: liveM.currentQuestionIndex ?? prev.currentQuestionIndex,
         broadcast: liveM.broadcast ?? prev.broadcast,
-        // L'état live porte les totaux PUBLICS (masqués pendant le match) :
-        // on ne les fusionne que quand ils sont montrés, sinon la table du
-        // jury afficherait des totaux masqués au lieu des vrais scores.
         ...(liveM.scoresHidden === true
           ? {}
           : { scoreA: liveM.scoreA, scoreB: liveM.scoreB }),
         scoresHidden: liveM.scoresHidden,
-        diffusedScore: liveM.diffusedScore ?? prev.diffusedScore,
         // currentQuestion sera rechargé via loadMatchDetails si questionId change
       };
     });
@@ -419,32 +413,6 @@ export const JuryDashboard: React.FC = () => {
     },
     [selectedMatchId, runAction, loadMatchDetails, refreshLiveState]
   );
-
-  /**
-   * Diffusion des points attribués à l'écran public.
-   *
-   * Acte explicite et séparé de la notation, comme le scénario : attribuer
-   * des points ne montre rien au public. Le jury (ou un administrateur,
-   * depuis cette même table — l'espace jury leur est ouvert) décide quand la
-   * salle voit les totaux et la dernière annonce.
-   */
-  const handleDiffuseScore = useCallback(() => {
-    if (selectedMatchId == null) return;
-    void runAction('Diffusion des points', async () => {
-      const res = await api.post<{ success: boolean; diffusedScore: DiffusedScore | null }>(
-        `/api/matches/${selectedMatchId}/diffuse-score`,
-        {}
-      );
-      const d = res.diffusedScore;
-      showFeedback(
-        d
-          ? `Points diffusés : ${d.points > 0 ? '+' : ''}${d.points} pts pour ${d.teamName}.`
-          : 'Points diffusés à l’écran.'
-      );
-      await loadMatchDetails(selectedMatchId);
-      void refreshLiveState();
-    });
-  }, [selectedMatchId, runAction, showFeedback, loadMatchDetails, refreshLiveState]);
 
   /**
    * Attribution de points.
@@ -558,10 +526,6 @@ export const JuryDashboard: React.FC = () => {
   // Le pilotage n'a de sens que sur un match démarré : la route refuse avant, et
   // un bouton actif qui échoue à chaque clic apprend au jury à ne pas s'en servir.
   const canBroadcast = isRunning && !actionLoading;
-  // Diffuser n'a de sens que s'il y a des points attribués à montrer : sans
-  // événement de score, la route refuse — même logique qu'au-dessus.
-  const canDiffuse =
-    isRunning && (matchDetails?.scoreEvents?.length ?? 0) > 0 && !actionLoading;
   const broadcastQuestionLabel =
     broadcast && broadcastStage && !STAGES_PER_MATCH.includes(broadcastStage)
       ? `Question ${broadcast.questionIndex + 1} / ${broadcast.questionCount}`
@@ -1263,50 +1227,6 @@ export const JuryDashboard: React.FC = () => {
                         {broadcast?.canAdvance === false ? 'Scénario terminé' : 'Étape suivante'}
                       </span>
                       <SkipForward className="w-3.5 h-3.5" aria-hidden="true" />
-                    </button>
-                  </div>
-                  {/* Diffusion des points attribués : attribuer ne montre rien
-                      au public, c'est ce bouton qui décide du moment où la
-                      salle voit les totaux et la dernière annonce. */}
-                  <div className="mt-4 w-full rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-                    <div className="min-w-0 text-xs" aria-live="polite">
-                      {matchDetails?.scoresHidden ? (
-                        <p className="font-semibold text-slate-700">
-                          Écran public : scores masqués
-                          <span className="block font-normal text-slate-500">
-                            Des points ont été attribués depuis la dernière diffusion.
-                          </span>
-                        </p>
-                      ) : matchDetails?.diffusedScore ? (
-                        <p className="font-semibold text-slate-700">
-                          Écran public : {matchDetails.diffusedScore.points > 0 ? '+' : ''}
-                          {matchDetails.diffusedScore.points} pts pour{' '}
-                          {matchDetails.diffusedScore.teamName}
-                          <span className="block font-normal text-slate-500">
-                            {matchDetails.diffusedScore.reason}
-                            {matchDetails.diffusedScore.questionIndex != null &&
-                              ` — question ${matchDetails.diffusedScore.questionIndex + 1}`}
-                          </span>
-                        </p>
-                      ) : (
-                        <p className="font-semibold text-slate-700">
-                          Écran public : 0 – 0
-                          <span className="block font-normal text-slate-500">
-                            Aucun point attribué pour l'instant.
-                          </span>
-                        </p>
-                      )}
-                    </div>
-                    <button
-                      id="btn-diffuse-score"
-                      type="button"
-                      disabled={!canDiffuse}
-                      onClick={handleDiffuseScore}
-                      title="Diffuser les points attribués à l'écran public"
-                      className="px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs flex items-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-1"
-                    >
-                      <Tv className="w-3.5 h-3.5" aria-hidden="true" />
-                      <span>Diffuser les points</span>
                     </button>
                   </div>
                 </div>
