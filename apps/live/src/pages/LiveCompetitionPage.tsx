@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useLive } from '@shared/context/LiveContext.tsx';
-import { APP_CONFIG } from '@shared/lib/config.ts';
 import { AeerksLogo } from '@shared/components/AeerksLogo.tsx';
 import { Badge, EmptyState } from '@shared/components/ui.tsx';
 import type { PublicTeamMember } from '@shared/types.ts';
@@ -43,7 +42,7 @@ function formatAge(ms: number): string {
  *   hierarchie se lise sans avoir a decoder les styles.
  */
 export const LiveCompetitionPage: React.FC = () => {
-  const { liveState, timerLeft, timerRunning, isConnected, lastUpdateAt } = useLive();
+  const { liveState, isConnected, lastUpdateAt } = useLive();
   const [showRankings, setShowRankings] = useState(true);
 
   // L'horloge du pied de page doit avancer meme sans nouveau message WebSocket,
@@ -671,8 +670,8 @@ export const LiveCompetitionPage: React.FC = () => {
                 suivante ») ; aucun point ne s’affiche pendant le match —
                 ni totaux, ni annonces. Seul le chrono accompagne. */}
             {currentQ ? (
-              <div className="flex min-h-[52vh] flex-col justify-center rounded-2xl border border-white/12 bg-slate-900/50 p-5 sm:p-10">
-                <div className="mb-6 flex flex-wrap items-center justify-center gap-2">
+              <div className="flex min-h-[72vh] flex-col justify-center rounded-2xl border border-white/12 bg-slate-900/50 p-6 sm:p-12">
+                <div className="mb-8 flex flex-wrap items-center justify-center gap-2">
                   <Badge
                     tone="primary"
                     className="border-[#2563EB]/40 bg-[#2563EB]/20 text-blue-100"
@@ -689,7 +688,7 @@ export const LiveCompetitionPage: React.FC = () => {
                   </Badge>
                 </div>
 
-                <p className="text-balance text-center text-2xl font-bold leading-snug text-white sm:text-4xl lg:text-5xl">
+                <p className="text-balance text-center text-3xl font-bold leading-snug text-white sm:text-5xl lg:text-6xl">
                   {currentQ.text}
                 </p>
 
@@ -720,33 +719,6 @@ export const LiveCompetitionPage: React.FC = () => {
                 </p>
               </div>
             )}
-
-            {/* Chrono : le seul chiffre du match affiché pendant les questions. */}
-            <div className="flex flex-col items-center justify-center">
-              <div
-                role="timer"
-                aria-label={`Chronomètre : ${timerLeft} secondes`}
-                className={[
-                  'flex h-32 w-32 flex-col items-center justify-center rounded-full border-2 sm:h-36 sm:w-36',
-                  'transition-colors duration-300 motion-reduce:transition-none',
-                  timerRunning
-                    ? timerLeft <= APP_CONFIG.TIMER_WARNING_SECONDS
-                      ? 'animate-pulse border-rose-400 bg-rose-500/15 text-rose-200 motion-reduce:animate-none'
-                      : 'border-amber-400/70 bg-amber-400/10 text-amber-200'
-                    : 'border-white/15 bg-slate-900/40 text-slate-400',
-                ].join(' ')}
-              >
-                <span className="text-5xl font-bold tabular-nums tracking-tight sm:text-6xl">
-                  {timerLeft}
-                </span>
-                <span className="text-[10px] font-semibold uppercase tracking-[0.14em] opacity-70">
-                  sec
-                </span>
-              </div>
-              <span className="mt-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                Chronomètre
-              </span>
-            </div>
 
             {/* Prise de parole : surbrillance de l’équipe, sans le libellé de ce
                 qu'elle a répondu — le jury statue, l'écran montre qui parle. */}
