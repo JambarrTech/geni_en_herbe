@@ -33,7 +33,6 @@ import {
   Sparkles,
   AlertCircle,
   UserPlus,
-  Save,
 } from 'lucide-react';
 import { UsersManager } from '../components/UsersManager.tsx';
 import { pickCurrentEvent } from '../lib/currentEvent.ts';
@@ -150,7 +149,10 @@ export const AdminDashboard: React.FC = () => {
   const [newQDifficulty, setNewQDifficulty] = useState<'FACILE' | 'MOYEN' | 'DIFFICILE'>('MOYEN');
   const [newQType, setNewQType] = useState<'DIRECT' | 'QCM' | 'TRUE_FALSE' | 'RAPID' | 'BONUS'>('DIRECT');
   const [newQOptions, setNewQOptions] = useState('');
-  const [questionToEdit, setQuestionToEdit] = useState<QuestionItem | null>(null);
+
+  // Question en cours d'édition (modale « Modifier »). `null` = modale fermée.
+  // Les champs sont pré-remplis à l'ouverture via `openQuestionEditor`.
+  const [editingQuestion, setEditingQuestion] = useState<QuestionItem | null>(null);
   const [editQText, setEditQText] = useState('');
   const [editQAnswer, setEditQAnswer] = useState('');
   const [editQCatId, setEditQCatId] = useState<number | ''>('');
@@ -370,6 +372,50 @@ export const AdminDashboard: React.FC = () => {
       void fetchData();
     } catch (err) {
       showToast(errorMessage(err, 'Erreur enregistrement question'), 'error');
+    }
+  };
+
+  // Pré-remplit le formulaire d'édition avec les valeurs de la question.
+  const openQuestionEditor = (q: QuestionItem) => {
+    setEditingQuestion(q);
+    setEditQText(q.text);
+    setEditQAnswer(q.answer);
+    setEditQCatId(q.categoryId);
+    setEditQPoints(q.points);
+    setEditQTime(q.timeLimitSeconds);
+    setEditQDifficulty(q.difficulty);
+    setEditQType(q.type);
+    setEditQOptions(Array.isArray(q.options) ? q.options.join(', ') : '');
+  };
+
+  const closeQuestionEditor = () => {
+    setEditingQuestion(null);
+  };
+
+  // Enregistre les modifications via PATCH /api/questions/:id.
+  const handleUpdateQuestion = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingQuestion) return;
+    if (!editQText || !editQAnswer || !editQCatId) return;
+    try {
+      await api.patch(`/api/questions/${editingQuestion.id}`, {
+        categoryId: editQCatId,
+        text: editQText,
+        answer: editQAnswer,
+        points: editQPoints,
+        timeLimitSeconds: editQTime,
+        difficulty: editQDifficulty,
+        type: editQType,
+        options:
+          editQType === 'QCM'
+            ? editQOptions.split(',').map((s) => s.trim()).filter(Boolean)
+            : null,
+      });
+      showToast('Question modifiée avec succès');
+      setEditingQuestion(null);
+      void fetchData();
+    } catch (err) {
+      showToast(errorMessage(err, 'Erreur modification question'), 'error');
     }
   };
 
@@ -1323,6 +1369,16 @@ export const AdminDashboard: React.FC = () => {
                       <span className="text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
                         {q.points} points • {q.timeLimitSeconds}s
                       </span>
+                      <button
+                        type="button"
+                        id={`btn-edit-question-${q.id}`}
+                        onClick={() => openQuestionEditor(q)}
+                        aria-label={`Modifier la question ${q.id}`}
+                        title="Modifier l'énoncé, la réponse et les informations de cette question"
+                        className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-[#0B3B82] hover:bg-blue-50 hover:border-blue-200 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-1 text-xs font-semibold px-2.5"
+                      >
+                        Modifier
+                      </button>
                       <BoutonSuppression
                         id={`btn-delete-question-${q.id}`}
                         label={`Supprimer la question ${q.text.slice(0, 60)}`}
@@ -1338,177 +1394,7 @@ export const AdminDashboard: React.FC = () => {
                     <span className="text-emerald-900 font-semibold">{q.answer}</span>
                   </div>
                 </div>
-                <div className="mt-2 flex gap-1">
-                  <BoutonSuppression
-                    id={`btn-delete-question-${q.id}`}
-                    label={`Supprimer la question ${q.text.slice(0, 60)}`}
-                    onClick={() => demanderSuppressionQuestion(q)}
-                  />
-                  <button
-                    id={`btn-edit-question-${q.id}`}
-                    onClick={() => setQuestionToEdit(q)}
-                    className="px-2.5 py-1. rounded-md bg-slate-50 text-slate-700 text-xs font-semibold hover:bg-slate-100 hover:text-slate-900 transition-colors"
-                    aria-label={`Modifier la question ${q.id}`}
-                  >
-                    Modifier
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Main closing tag */}
-        </main>
-
-        {/* Modal de modification de question */}
-        {questionToEdit && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-            <div className="bg-white rounded-2xl border border-slate-200 p-8 w-full max-w-md mx-4 shadow-2xl">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-lg font-bold text-slate-900">Modifier la Question</h3>
-                <button
-                  onClick={() => setQuestionToEdit(null)}
-                  className="text-slate-400 hover:text-slate-600"
-                  aria-label="Annuler la modification"
-                >
-                  ✕
-                </button>
-              </div>
-              
-              <form
-                onSubmit={async (e: React.FormEvent) => {
-                  e.preventDefault();
-                  if (!editQText || !editQAnswer || !editQCatId) return;
-                  try {
-                    await api.patch(`/api/questions/${questionToEdit.id}`, {
-                      categoryId: editQCatId,
-                      text: editQText,
-                      answer: editQAnswer,
-                      points: editQPoints,
-                      timeLimitSeconds: editQTime,
-                      difficulty: editQDifficulty,
-                      type: editQType,
-                      options: editQType === 'QCM' ? editQOptions.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
-                    });
-                    showToast('Question modifiée avec succès');
-                    setQuestionToEdit(null);
-                    void fetchData();
-                  } catch (err) {
-                    showToast(errorMessage(err, 'Erreur modification question'), 'error');
-                  }
-                }}
-              >
-                <div className="grid grid-cols-2 gap-4 mb-6">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Texte de la question</label>
-                    <input
-                      type="text"
-                      value={editQText}
-                      onChange={(e) => setEditQText(e.target.value)}
-                      className="w-full px-3 py-2 rounded-md border border-slate-300 focus:ring-2 focus:ring-[#0B3B82] focus:border-transparent"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Réponse officielle</label>
-                    <input
-                      type="text"
-                      value={editQAnswer}
-                      onChange={(e) => setEditQAnswer(e.target.value)}
-                      className="w-full px-3 py-2 rounded-md border border-slate-300 focus:ring-2 focus:ring-[#0B3B82] focus:border-transparent"
-                      required
-                    />
-                  </div>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4 mb-6">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Catégorie</label>
-                    <select
-                      value={editQCatId}
-                      onChange={(e) => setEditQCatId(e.target.value ? parseInt(e.target.value, 10) : '')}
-                      className="w-full px-3 py-2 rounded-md border border-slate-300 focus:ring-2 focus:ring-[#0B3B82] focus:border-transparent"
-                    >
-                      <option value="">Sélectionner une catégorie</option>
-                      {categoriesList.map((cat) => (
-                        <option key={cat.id} value={cat.id}>{cat.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Type</label>
-                    <select
-                      value={editQType}
-                      onChange={(e) => setEditQType(e.target.value)}
-                      className="w-full px-3 py-2 rounded-md border border-slate-300 focus:ring-2 focus:ring-[#0B3B82] focus:border-transparent"
-                    >
-                      <option value="DIRECT">DIRECT</option>
-                      <option value="QCM">QCM</option>
-                      <option value="TRUE_FALSE">VRAI/FALSÉ</option>
-                      <option value="RAPID">RAPIDE</option>
-                      <option value="BONUS">BONUS</option>
-                    </select>
-                  </div>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4 mb-6">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Difficulté</label>
-                    <select
-                      value={editQDifficulty}
-                      onChange={(e) => setEditQDifficulty(e.target.value)}
-                      className="w-full px-3 py-2 rounded-md border border-slate-300 focus:ring-2 focus:ring-[#0B3B82] focus:border-transparent"
-                    >
-                      <option value="FACILE">Facile</option>
-                      <option value="MOYEN">Moyen</option>
-                      <option value="DIFFICILE">Difficile</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Points</label>
-                    <input
-                      type="number"
-                      value={editQPoints}
-                      onChange={(e) => setEditQPoints(parseInt(e.target.value, 10))}
-                      className="w-full px-3 py-2 rounded-md border border-slate-300 focus:ring-2 focus:ring-[#0B3B82] focus:border-transparent"
-                      min={CONFIG.MIN_QUESTION_POINTS}
-                      max={CONFIG.MAX_QUESTION_POINTS}
-                    />
-                  </div>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4 mb-6" id="options-field">
-                  {editQType === 'QCM' && (
-                    <div>
-                      <label className="block text-sm font-medium text-slate-700 mb-1">Options (séparées par des virgules)</label>
-                      <input
-                        type="text"
-                        value={editQOptions}
-                        onChange={(e) => setEditQOptions(e.target.value)}
-                        className="w-full px-3 py-2 rounded-md border border-slate-300 focus:ring-2 focus:ring-[#0B3B82] focus:border-transparent"
-                        placeholder="Option A, Option B, Option C"
-                      />
-                    </div>
-                  )}
-                </div>
-                
-                <div className="mt-6 flex gap-3">
-                  <button
-                    type="submit"
-                    className="flex-1 px-4 py-2 rounded-xl bg-[#0B3B82] hover:bg-[#2563EB] text-white font-bold shadow-md flex items-center gap-1.5"
-                  >
-                    <Save className="w-4 h-4" /> Enregistrer
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setQuestionToEdit(null)}
-                    className="flex-1 px-4 py-2 rounded-xl border border-slate-300 hover:bg-slate-50 text-slate-700 text-sm shadow-xs flex items-center gap-1.5"
-                  >
-                    Annuler
-                  </button>
-                </div>
-              </form>
+              ))}
             </div>
           </div>
         )}
@@ -1611,6 +1497,7 @@ export const AdminDashboard: React.FC = () => {
             }}
           />
         )}
+      </main>
 
       {/* MODAL ADD TEAM */}
       <Modal
@@ -1789,6 +1676,142 @@ export const AdminDashboard: React.FC = () => {
                   className="px-4 py-1.5 rounded-xl bg-[#0B3B82] text-white text-xs font-bold"
                 >
                   Enregistrer la question
+                </button>
+              </div>
+            </form>
+      </Modal>
+
+      {/* MODAL EDIT QUESTION */}
+      <Modal
+        open={editingQuestion !== null}
+        onClose={closeQuestionEditor}
+        title="Modifier la Question"
+        className="max-w-lg"
+      >
+            <form onSubmit={handleUpdateQuestion} className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Catégorie *</label>
+                <select
+                  required
+                  value={editQCatId}
+                  onChange={(e) => setEditQCatId(e.target.value ? Number(e.target.value) : '')}
+                  className="w-full p-2.5 rounded-xl border border-slate-300 text-xs text-slate-800"
+                >
+                  <option value="">Sélectionner une discipline...</option>
+                  {categoriesList.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Énoncé de la question *</label>
+                <textarea
+                  required
+                  rows={3}
+                  value={editQText}
+                  onChange={(e) => setEditQText(e.target.value)}
+                  placeholder="Énoncé lu à haute voix..."
+                  className="w-full p-2.5 rounded-xl border border-slate-300 text-xs text-slate-800"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Réponse officielle certifiée *</label>
+                <input
+                  required
+                  value={editQAnswer}
+                  onChange={(e) => setEditQAnswer(e.target.value)}
+                  placeholder="Réponse exacte attendue..."
+                  className="w-full p-2.5 rounded-xl border border-slate-300 text-xs text-slate-800 font-bold"
+                />
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Points</label>
+                  <input
+                    type="number"
+                    value={editQPoints}
+                    onChange={(e) => setEditQPoints(Number(e.target.value))}
+                    className="w-full p-2 rounded-xl border border-slate-300 text-xs text-slate-800 font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Temps (sec)</label>
+                  <input
+                    type="number"
+                    value={editQTime}
+                    onChange={(e) => setEditQTime(Number(e.target.value))}
+                    className="w-full p-2 rounded-xl border border-slate-300 text-xs text-slate-800 font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Difficulté</label>
+                  <select
+                    value={editQDifficulty}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setEditQDifficulty(
+                        v === 'FACILE' || v === 'DIFFICILE' ? v : 'MOYEN'
+                      );
+                    }}
+                    className="w-full p-2 rounded-xl border border-slate-300 text-xs text-slate-800 font-semibold"
+                  >
+                    <option value="FACILE">Facile</option>
+                    <option value="MOYEN">Moyen</option>
+                    <option value="DIFFICILE">Difficile</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Type de question</label>
+                <select
+                  value={editQType}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setEditQType(
+                      v === 'QCM' || v === 'TRUE_FALSE' || v === 'RAPID' || v === 'BONUS'
+                        ? v
+                        : 'DIRECT'
+                    );
+                  }}
+                  className="w-full p-2.5 rounded-xl border border-slate-300 text-xs text-slate-800 font-semibold"
+                >
+                  <option value="DIRECT">Directe (énoncé oral)</option>
+                  <option value="QCM">QCM (choix multiples)</option>
+                  <option value="TRUE_FALSE">Vrai / Faux</option>
+                  <option value="RAPID">Rapidité (vitesse)</option>
+                  <option value="BONUS">Bonus</option>
+                </select>
+              </div>
+              {editQType === 'QCM' && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Options (séparées par des virgules) * — 2 minimum
+                  </label>
+                  <textarea
+                    required
+                    rows={2}
+                    value={editQOptions}
+                    onChange={(e) => setEditQOptions(e.target.value)}
+                    placeholder="ex: Dakar, Saint-Louis, Thiès, Ziguinchor"
+                    className="w-full p-2.5 rounded-xl border border-slate-300 text-xs text-slate-800"
+                  />
+                </div>
+              )}
+              <div className="flex justify-end gap-2 pt-3">
+                <button
+                  type="button"
+                  onClick={closeQuestionEditor}
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 rounded-xl bg-[#0B3B82] text-white text-xs font-bold"
+                >
+                  Enregistrer les modifications
                 </button>
               </div>
             </form>
