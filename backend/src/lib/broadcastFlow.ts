@@ -109,10 +109,14 @@ export function isBroadcastStage(value: unknown): value is BroadcastStage {
  * la forme de la séquence dépend du nombre de questions (une série vide n'a ni
  * question ni réponse à révéler), et une liste rend cette dépendance visible
  * au lieu de la dissimuler dans une formule.
+ *
+ * Le scénario démarre DIRECTEMENT sur la première question (pas d'effectif d'équipes).
+ * L'étape ROSTER a été supprimée : quand le jury lance le match, l'écran public
+ * affiche immédiatement la question 1.
  */
 export function broadcastSequence(questionCount: number): BroadcastCursor[] {
   const count = Math.max(0, Math.floor(questionCount) || 0);
-  const sequence: BroadcastCursor[] = [{ stage: BROADCAST_STAGE.ROSTER, questionIndex: 0 }];
+  const sequence: BroadcastCursor[] = [];
   for (let i = 0; i < count; i += 1) {
     for (const stage of QUESTION_STAGES) {
       sequence.push({ stage, questionIndex: i });
@@ -126,11 +130,11 @@ export function broadcastSequence(questionCount: number): BroadcastCursor[] {
  * Ramène un curseur, quelle que soit sa valeur, dans le scénario réellement jouable.
  *
  * Trois corrections, chacune tirée d'un incident possible :
- *  - étape inconnue -> `ROSTER` (cf. `isBroadcastStage`) ;
+ *  - étape inconnue -> `QUESTION` (cf. `isBroadcastStage`) ;
  *  - index hors bornes -> ramené dans la série, parce qu'une série raccourcie
  *    (question supprimée en cours de concours) laisse derrière elle un index
  *    qui ne désigne plus rien ;
- *  - série vide -> seules `ROSTER` et `FINAL` existent. Sans ce cas, un curseur
+ *  - série vide -> seule `FINAL` existe. Sans ce cas, un curseur
  *    sur `QUESTION` avec zéro question produirait un écran coincé sur une
  *    question inexistante.
  */
@@ -142,14 +146,12 @@ export function normalizeCursor(
   const count = Math.max(0, Math.floor(questionCount) || 0);
 
   if (count === 0) {
-    return stage === BROADCAST_STAGE.FINAL
-      ? { stage: BROADCAST_STAGE.FINAL, questionIndex: 0 }
-      : { stage: BROADCAST_STAGE.ROSTER, questionIndex: 0 };
+    return { stage: BROADCAST_STAGE.FINAL, questionIndex: 0 };
   }
 
   const rawIndex = Number.isFinite(questionIndex) ? Math.floor(questionIndex as number) : 0;
   const clamped = Math.min(Math.max(rawIndex, 0), count - 1);
-  return { stage: isBroadcastStage(stage) ? stage : BROADCAST_STAGE.ROSTER, questionIndex: clamped };
+  return { stage: isBroadcastStage(stage) ? stage : BROADCAST_STAGE.QUESTION, questionIndex: clamped };
 }
 
 function sameCursor(a: BroadcastCursor, b: BroadcastCursor): boolean {
@@ -180,9 +182,14 @@ export function previousCursor(cursor: BroadcastCursor, questionCount: number): 
   return sequence[index - 1] ?? null;
 }
 
-/** Première étape du scénario (l'effectif des équipes). */
+/** Première étape du scénario (la première question). */
 export function firstCursor(): BroadcastCursor {
-  return { stage: BROADCAST_STAGE.ROSTER, questionIndex: 0 };
+  return { stage: BROADCAST_STAGE.QUESTION, questionIndex: 0 };
+}
+
+/** Positionne un curseur à l'étape souhaitée pour une série donnée de questions. */
+export function walkTo(stage: BroadcastStage): BroadcastCursor {
+  return { stage, questionIndex: 0 };
 }
 
 /** Position complète dans le scénario, pour piloter l'écran et le tableau de jury. */
@@ -221,7 +228,7 @@ export function stageIsPerQuestion(stage: BroadcastStage): boolean {
 
 /** Étapes qui n'appartiennent à aucune question : aucune de la série. */
 export function stageIsPerMatch(stage: BroadcastStage): boolean {
-  return stage === BROADCAST_STAGE.ROSTER || stage === BROADCAST_STAGE.FINAL;
+  return stage === BROADCAST_STAGE.FINAL;
 }
 
 /**
@@ -239,6 +246,8 @@ export function stageIsPerMatch(stage: BroadcastStage): boolean {
  * Vingt secondes : de quoi lire une dizaine de noms à voix haute sans hâter. Une
  * valeur plus courte couperait la présentation ; une plus longue laisserait un
  * écran figé que personne n'ose interrompre.
+ *
+ * @deprecated L'étape ROSTER a été supprimée. Cette constante n'est plus utilisée.
  */
 export const ROSTER_STAGE_SECONDS = 20;
 
@@ -261,6 +270,8 @@ export const ROSTER_STAGE_SECONDS = 20;
  * Conséquence directe, et elle est voulue : revenir sur l'effectif au bouton
  * « retour » du jury n'est JAMAIS neutralisé par une bascule automatique. C'est
  * le jury qui décide si ce retour doit tenir.
+ *
+ * @deprecated L'étape ROSTER a été supprimée. Cette fonction n'est plus utilisée.
  */
 export function rosterShouldAutoAdvance(input: {
   /**
@@ -287,6 +298,8 @@ export function rosterShouldAutoAdvance(input: {
  * On retourne la date plutôt qu'un booléen pour que l'appelant ne puisse pas
  * écrire `broadcastRosterUntil = null` en croyant avoir armé le minutage : la
  * signature rend l'oubli visible.
+ *
+ * @deprecated L'étape ROSTER a été supprimée. Cette fonction n'est plus utilisée.
  */
 export function rosterDeadline(now: Date): Date {
   return new Date(now.getTime() + ROSTER_STAGE_SECONDS * 1000);

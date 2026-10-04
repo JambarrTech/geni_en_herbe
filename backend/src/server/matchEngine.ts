@@ -2,22 +2,17 @@ import { db } from '../db/index.ts';
 import {
   matches,
   matchQuestions,
-  scoreEvents,
   teams,
   auditLogs,
   events,
   questions,
 } from '../db/schema.ts';
-import { and, eq, desc, isNotNull } from 'drizzle-orm';
+import { eq, desc } from 'drizzle-orm';
 import { type TeamRanking, type LiveStatePayload } from '../types.ts';
 import { publicQuestion, revealedQuestion } from '../lib/sanitize.ts';
 import {
-  BROADCAST_STAGE,
   broadcastPosition,
-  nextCursor,
   normalizeCursor,
-  rosterShouldAutoAdvance,
-  timerUpdateForStep,
 } from '../lib/broadcastFlow.ts';
 import { loadPublicRosters, type PublicTeamMember } from '../lib/publicRoster.ts';
 import { publish as publishBusEvent } from './pubsub.ts';
@@ -184,155 +179,11 @@ async function timerLoopTick() {
       }
     }
   }
-
-  // L'effectif des équipes est minuté : on le quitte seul quand son délai est
-  // écoulé. Appelée ici, dans la boucle qui existe déjà, pour ne dépendre d'aucun
-  // minuteur en mémoire — celui-ci perdrait la bascule au premier redémarrage du
-  // worker, donc au pire moment.
-  await autoAdvanceRosterStages();
 }
 
 /**
  * Quitte l'étape `ROSTER` une fois son délai écoulé, pour le match concerné.
- *
- * APPELÉE DE LA BOUCLE EXISTANTE, PAS D'UN MINUTEUR DEDIE
- * -------------------------------------------------------
- * `timerLoopTick` tourne déjà une fois par seconde, se replie sur elle-même en
- * cas de base injoignable, et n'émet que quand un état change. Un `setTimeout`
- * séparé serait plus court à écrire mais perdrait la bascule au moindre
- * redémarrage du worker — c'est-à-dire au pire moment, en plein concours.
- *
- * L'IDEMPOTENCE EST ASSURÉE PAR L'ÉCRITURE, PAS PAR LA LECTURE
- * ----------------------------------------------------------
- * Between la lecture des candidats et l'écriture, le jury a très bien pu appuyer
- * sur « Étape suivante ». On rejoue donc la décision dans la clause `WHERE` :
- * si le curseur n'est plus sur `ROSTER`, aucune ligne n'est touchée et l'on
- * s'arrête. Deux workers qui passeraient en même temps ne prevailsent pas l'un
- * l'autre, et le second ne trouve rien à écrire.
- *
- * Le chrono de la question part ICI, pas avant : `timerUpdateForStep` arme le
- * décompte sur une entrée en étape `QUESTION`, donc la question 1 est minutée à
- * l'instant où elle apparaît à l'écran, et pas pendant la présentation de
- * l'effectif.
- */
-export async function autoAdvanceRosterStage(matchId: number): Promise<boolean> {
-  const now = new Date();
-
-  const [candidate] = await db.select().from(matches).where(eq(matches.id, matchId));
-  if (!candidate) return false;
-  if (!rosterShouldAutoAdvance({ stage: candidate.broadcastStage, rosterUntil: candidate.broadcastRosterUntil, now })) {
-    return false;
-  }
-  // Un match arrêté en cours de route ne doit pas repartir tout seul.
-  if (candidate.status !== FLOW.MATCH_STATUS.LIVE) return false;
-
-  const mQuestions = await db
-    .select()
-    .from(matchQuestions)
-    .where(eq(matchQuestions.matchId, matchId))
-    .orderBy(matchQuestions.orderNumber);
-
-  const from = normalizeCursor(candidate.broadcastStage, candidate.currentQuestionIndex, mQuestions.length);
-  const to = nextCursor(from, mQuestions.length);
-  if (!to) return false;
-
-  const target = mQuestions[to.questionIndex];
-  const [targetQuestion] = target
-    ? await db
-        .select({ timeLimitSeconds: questions.timeLimitSeconds })
-        .from(questions)
-        .where(eq(questions.id, target.questionId))
-        .limit(1)
-    : [null];
-
-  const questionChanged = to.questionIndex !== candidate.currentQuestionIndex;
-  const timerUpdate = timerUpdateForStep(
-    {
-      action: 'next',
-      targetStage: to.stage,
-      questionChanged,
-      neverPlayed: target?.status === FLOW.QUESTION_STATUS.PENDING || target?.status === FLOW.QUESTION_STATUS.ACTIVE,
-      previousSeconds: candidate.timerSecondsLeft,
-      previousDuration: candidate.timerDuration,
-    },
-    targetQuestion?.timeLimitSeconds || CONFIG.DEFAULT_TIMER_SECONDS
-  );
-
-  // La clause `WHERE` porte la décision : sans elle, une pression du jury
-  // passée entre la lecture et ici serait écrasée, et l'écran public ferait un
-  // cran de trop en arrière de ce que le jury vient de demander.
-  const [updated] = await db
-    .update(matches)
-    .set({
-      broadcastStage: to.stage,
-      broadcastRosterUntil: null,
-      ...(questionChanged
-        ? {
-            currentQuestionIndex: to.questionIndex,
-            currentQuestionId: target?.questionId ?? candidate.currentQuestionId,
-          }
-        : {}),
-      ...(timerUpdate ?? {}),
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(matches.id, matchId),
-        eq(matches.broadcastStage, BROADCAST_STAGE.ROSTER)
-      )
-    )
-    .returning();
-
-  if (!updated) return false;
-
-  const liveState = await getLiveState(candidate.eventId);
-  broadcast('broadcast_step', {
-    matchId,
-    action: 'next',
-    from,
-    to,
-    match: updated,
-    liveState,
-    automatic: true,
-  });
-
-  log.info('Bascule automatique de l\'effectif vers la question', {
-    matchId,
-    questionIndex: to.questionIndex,
-  });
-
-  return true;
-}
-
-/**
- * Passe en revue les matchs dont l'effectif des équipes devrait s'effacer.
- *
- * Le filtre fin se fait en JavaScript, via la fonction pure testée, plutôt qu'en
- * SQL : la décision doit rester dans un module vérifiable, et le volume concerné
- * se compte en matchs en cours — deux ou trois au maximum, à 1 Hz.
- */
-export async function autoAdvanceRosterStages(): Promise<number> {
-  const candidates = await db
-    .select({ id: matches.id })
-    .from(matches)
-    .where(isNotNull(matches.broadcastRosterUntil));
-
-  let advanced = 0;
-  for (const { id } of candidates) {
-    try {
-      if (await autoAdvanceRosterStage(id)) advanced += 1;
-    } catch (err) {
-      // Un échec sur UN match ne doit pas empêcher les autres de basculer, ni
-      // faire tomber la boucle de chrono : c'est une bascule d'affichage, pas un
-      // décompte. On le signale et on passe au suivant.
-      log.error('Bascule automatique impossible', { matchId: id, err });
-      metrics.dbErrors.inc({ operation: 'auto-advance-roster' });
-    }
-  }
-  return advanced;
-}
-
-// Recalculate match score purely from score_events
+ // Recalculate match score purely from score_events
 export async function recalculateMatchScore(matchId: number) {  const eventsList = await db
     .select()
     .from(scoreEvents)
