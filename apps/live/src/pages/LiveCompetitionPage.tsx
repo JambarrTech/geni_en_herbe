@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { useLive } from '@shared/context/LiveContext.tsx';
 import { AeerksLogo } from '@shared/components/AeerksLogo.tsx';
 import { Badge, EmptyState } from '@shared/components/ui.tsx';
@@ -15,18 +15,6 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 
-/** Ancienneté d'une donnée, en français, de façon compacte. */
-function formatAge(ms: number): string {
-  const s = Math.max(0, Math.round(ms / 1000));
-  if (s < 5) return "à l'instant";
-  if (s < 60) return `il y a ${s} s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `il y a ${m} min`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `il y a ${h} h`;
-  return `il y a ${Math.floor(h / 24)} j`;
-}
-
 /**
  * Panneau de l'écran public.
  *
@@ -40,15 +28,7 @@ function formatAge(ms: number): string {
  *   hierarchie se lise sans avoir a decoder les styles.
  */
 export const LiveCompetitionPage: React.FC = () => {
-  const { liveState, isConnected, lastUpdateAt } = useLive();
-
-  // L'horloge du pied de page doit avancer meme sans nouveau message WebSocket,
-  // sinon l'age affiche resterait fige.
-  const [, forceTick] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => forceTick((n) => n + 1), 1000);
-    return () => clearInterval(t);
-  }, []);
+  const { liveState, isConnected } = useLive();
 
   const activeMatch = liveState?.activeMatch;
   const rankings = liveState?.rankings || [];
@@ -732,62 +712,6 @@ export const LiveCompetitionPage: React.FC = () => {
           </section>
         )}
       </main>
-
-      {/* ---------- Classement (toujours visible : pas de repli) ---------- */}
-      <footer className="relative z-10 border-t border-white/10 pt-3">
-        <div className="mb-2 flex flex-wrap items-center justify-end gap-2">
-          <div className="flex items-center gap-3 text-xs text-slate-500">
-            {lastUpdateAt != null && (
-              <span className="tabular-nums">
-                Actualisé {formatAge(Date.now() - lastUpdateAt)}
-              </span>
-            )}
-            <span className="hidden lg:inline">
-              Amicale des Élèves et Étudiants Ressortissants de Keur Salla Mbatta
-            </span>
-          </div>
-        </div>
-
-        {rankings.length > 0 ? (
-          <div
-            id="classement-tournoi"
-            className="grid grid-cols-2 gap-2.5 pt-1 sm:grid-cols-3 lg:grid-cols-4"
-          >
-              {rankings.map((r) => (
-                <div
-                  key={r.teamId}
-                  className="flex items-center justify-between gap-2 rounded-xl border border-white/10 bg-slate-900/40 px-3 py-2.5"
-                >
-                  <div className="flex min-w-0 items-center gap-2.5">
-                    <span
-                      aria-hidden="true"
-                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-white/10 text-xs font-bold tabular-nums text-amber-300"
-                    >
-                      {r.position}
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block truncate text-xs font-semibold text-white">
-                        {r.teamName}
-                      </span>
-                      <span className="block text-[10px] text-slate-500">{r.teamCode}</span>
-                    </span>
-                  </div>
-                  <span className="shrink-0 text-sm font-bold tabular-nums text-white">
-                    {r.totalScore}
-                    <span className="ml-1 text-[10px] font-medium text-slate-500">pts</span>
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p
-              id="classement-tournoi"
-              className="py-3 text-center text-xs text-slate-500"
-            >
-              Le classement s'affichera dès la clôture des premiers matchs.
-            </p>
-          )}
-      </footer>
     </div>
   );
 };
