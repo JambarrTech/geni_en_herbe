@@ -106,6 +106,9 @@ export const categories = pgTable('categories', {
   id: serial('id').primaryKey(),
   name: text('name').notNull(),
   description: text('description'),
+  // Ordre d'affichage : 1 = première catégorie à l'écran public et dans la
+  // banque groupée. Modifiable par l'admin (réorganisation des catégories).
+  position: integer('position').notNull().default(0),
   active: boolean('active').notNull().default(true),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });

@@ -2,13 +2,15 @@ import { db } from '../db/index.ts';
 import {
   matches,
   matchQuestions,
+  scoreEvents,
   teams,
   auditLogs,
   events,
   questions,
+  categories,
 } from '../db/schema.ts';
-import { eq, desc } from 'drizzle-orm';
-import { type TeamRanking, type LiveStatePayload } from '../types.ts';
+import { eq, desc, inArray } from 'drizzle-orm';
+import { type TeamRanking, type LiveStatePayload, type CategoryRankings } from '../types.ts';
 import { publicQuestion, revealedQuestion } from '../lib/sanitize.ts';
 import {
   broadcastPosition,
@@ -353,6 +355,125 @@ export async function calculateRankings(eventId: number): Promise<TeamRanking[]>
   return sortAndRankRankings(rankings);
 }
 
+// Ligne de journal exploitable pour un classement par catégorie : l'équipe,
+// les points, et la catégorie (via la question). Les événements SANS question
+// rattachée (ajustements manuels) ne comptent dans aucune catégorie.
+export interface CategoryScoreRow {
+  teamId: number;
+  points: number;
+  categoryId: number | null;
+}
+
+/**
+ * Agrège des lignes de score en classements par catégorie. PURE ET TESTABLE :
+ * la lecture base de données vit dans `calculateCategoryRankings`, l'arithmétique
+ * ici — un podium faux se voit dans un test, pas sur l'écran de la salle.
+ *
+ * Règles :
+ * - catégories ordonnées par (`position`, `id`) : le même ordre que la banque
+ *   groupée et l'écran public ;
+ * - toutes les équipes figurent dans chaque catégorie (zéro explicite plutôt
+ *   qu'absence : une absence se lit comme un oubli) ;
+ * - tri par points décroissants, puis bonnes réponses décroissantes, puis
+ *   identifiant croissant (déterministe) ; ex æquo parfait = position partagée.
+ */
+export function aggregateCategoryStandings(
+  teamList: { id: number; name: string; code: string }[],
+  categoryList: { id: number; name: string; position: number }[],
+  rows: CategoryScoreRow[]
+): CategoryRankings[] {
+  const orderedCategories = [...categoryList].sort(
+    (a, b) => a.position - b.position || a.id - b.id
+  );
+
+  return orderedCategories.map((cat) => {
+    const pointsByTeam = new Map<number, number>();
+    const answeredByTeam = new Map<number, number>();
+    for (const t of teamList) {
+      pointsByTeam.set(t.id, 0);
+      answeredByTeam.set(t.id, 0);
+    }
+    for (const row of rows) {
+      if (row.categoryId !== cat.id) continue;
+      if (!pointsByTeam.has(row.teamId)) continue;
+      pointsByTeam.set(row.teamId, pointsByTeam.get(row.teamId)! + row.points);
+      if (row.points > 0) {
+        answeredByTeam.set(row.teamId, answeredByTeam.get(row.teamId)! + 1);
+      }
+    }
+
+    const standings = teamList
+      .map((t) => ({
+        position: 0,
+        teamId: t.id,
+        teamName: t.name,
+        teamCode: t.code,
+        points: pointsByTeam.get(t.id) ?? 0,
+        questionsAnswered: answeredByTeam.get(t.id) ?? 0,
+      }))
+      .sort((a, b) => b.points - a.points || b.questionsAnswered - a.questionsAnswered || a.teamId - b.teamId);
+
+    standings.forEach((s, idx) => {
+      const prev = standings[idx - 1];
+      s.position =
+        prev && prev.points === s.points && prev.questionsAnswered === s.questionsAnswered
+          ? prev.position
+          : idx + 1;
+    });
+
+    return {
+      categoryId: cat.id,
+      categoryName: cat.name,
+      categoryPosition: cat.position,
+      standings,
+    };
+  });
+}
+
+// Classement des équipes, catégorie par catégorie, pour un événement.
+// Seuls les matchs clôturés comptent (même règle que `calculateRankings`) :
+// un match en cours ne doit jamais faire bouger un podium affiché.
+export async function calculateCategoryRankings(eventId: number): Promise<CategoryRankings[]> {
+  const [allTeams, allCategories, allMatches] = await Promise.all([
+    db
+      .select({ id: teams.id, name: teams.name, code: teams.code })
+      .from(teams)
+      .where(eq(teams.eventId, eventId))
+      .orderBy(teams.id),
+    db
+      .select({ id: categories.id, name: categories.name, position: categories.position })
+      .from(categories),
+    db
+      .select({ id: matches.id, status: matches.status })
+      .from(matches)
+      .where(eq(matches.eventId, eventId)),
+  ]);
+
+  const closedIds = allMatches
+    .filter((m) => m.status === FLOW.MATCH_STATUS.FINISHED)
+    .map((m) => m.id);
+
+  let rows: CategoryScoreRow[] = [];
+  if (closedIds.length > 0) {
+    const events = await db
+      .select({
+        teamId: scoreEvents.teamId,
+        points: scoreEvents.points,
+        categoryId: questions.categoryId,
+      })
+      .from(scoreEvents)
+      .leftJoin(questions, eq(scoreEvents.questionId, questions.id))
+      .where(inArray(scoreEvents.matchId, closedIds));
+    rows = events.map((e) => ({
+      teamId: e.teamId,
+      points: e.points,
+      categoryId: e.categoryId ?? null,
+    }));
+  }
+
+  return aggregateCategoryStandings(allTeams, allCategories, rows);
+}
+
 // Prepare comprehensive Live State payload.
 // Le calcul du classement coûte plusieurs requêtes : il n'est inclus que lorsqu'il
 // change (clôture d'un match, publication) ou quand il est explicitement demandé.
@@ -476,7 +597,32 @@ export async function getLiveState(eventId?: number, includeRankings = false): P
     let currentQuestion = null;
     const currentQuestionId = cursorMQ?.questionId ?? activeMatchRaw.currentQuestionId;
     if (currentQuestionId) {
-      const [q] = await db.select().from(questions).where(eq(questions.id, currentQuestionId));
+      // Le nom et la position de la catégorie accompagnent l'énoncé : l'écran
+      // public affiche déjà un badge `categoryName` (jamais renseigné
+      // jusqu'ici, la question étant lue sans jointure), et l'ordre des
+      // catégories décide de l'ordre des questions.
+      const [q] = await db
+        .select({
+          id: questions.id,
+          categoryId: questions.categoryId,
+          categoryName: categories.name,
+          categoryPosition: categories.position,
+          eventId: questions.eventId,
+          text: questions.text,
+          answer: questions.answer,
+          type: questions.type,
+          difficulty: questions.difficulty,
+          points: questions.points,
+          timeLimitSeconds: questions.timeLimitSeconds,
+          options: questions.options,
+          explanation: questions.explanation,
+          mediaUrl: questions.mediaUrl,
+          active: questions.active,
+          createdAt: questions.createdAt,
+        })
+        .from(questions)
+        .leftJoin(categories, eq(questions.categoryId, categories.id))
+        .where(eq(questions.id, currentQuestionId));
       currentQuestion = stage.revealsAnswer ? revealedQuestion(q) : publicQuestion(q);
     }
 

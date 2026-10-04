@@ -72,6 +72,8 @@ export interface CategoryItem {
   id: number;
   name: string;
   description?: string | null;
+  /** Ordre d'affichage : 1 = première catégorie (écran public, banque groupée). */
+  position: number;
   active: boolean;
   createdAt: string;
   questionsCount?: number;
@@ -246,6 +248,28 @@ export interface TeamRanking {
   pointsConceded: number;
   pointsDifference: number;
   totalScore: number;
+}
+
+/**
+ * Classement d'une équipe pour UNE catégorie : points marqués sur les
+ * questions de cette catégorie (matchs clôturés uniquement, comme le
+ * classement général). Les ajustements manuels sans question rattachée ne
+ * comptent dans aucune catégorie.
+ */
+export interface CategoryStanding {
+  position: number;
+  teamId: number;
+  teamName: string;
+  teamCode: string;
+  points: number;
+  questionsAnswered: number;
+}
+
+export interface CategoryRankings {
+  categoryId: number;
+  categoryName: string;
+  categoryPosition: number;
+  standings: CategoryStanding[];
 }
 
 export interface AuditLogItem {

@@ -24,6 +24,26 @@ export interface TeamRanking {
   totalScore: number;
 }
 
+/**
+ * Classement d'une équipe pour UNE catégorie (points marqués sur les
+ * questions de cette catégorie, matchs clôturés uniquement).
+ */
+export interface CategoryStanding {
+  position: number;
+  teamId: number;
+  teamName: string;
+  teamCode: string;
+  points: number;
+  questionsAnswered: number;
+}
+
+export interface CategoryRankings {
+  categoryId: number;
+  categoryName: string;
+  categoryPosition: number;
+  standings: CategoryStanding[];
+}
+
 export interface LiveStatePayload {
   event: any | null;
   activeMatch: any | null;

@@ -1,6 +1,6 @@
 import { db } from '../db/index.ts';
-import { questions, matchQuestions, matches } from '../db/schema.ts';
-import { eq, inArray } from 'drizzle-orm';
+import { categories, questions, matchQuestions, matches } from '../db/schema.ts';
+import { asc, eq, inArray } from 'drizzle-orm';
 import { CONFIG } from '../config.ts';
 
 // Select questions for a match.
@@ -54,10 +54,26 @@ export async function selectQuestionsForMatch(
   const picked: number[] = [];
   const seen = new Set<number>();
 
+  // Round-robin dans l'ordre d'affichage des catégories (`position`) : la
+  // catégorie que l'admin a placée en premier ouvre la série — donc l'écran
+  // public — et chaque catégorie est ensuite représentée à tour de rôle.
+  const catPositions = new Map(
+    (
+      await db
+        .select({ id: categories.id, position: categories.position })
+        .from(categories)
+        .orderBy(asc(categories.position), asc(categories.id))
+    ).map((c) => [c.id, c.position] as const)
+  );
+  const rankOf = (catId: number) => catPositions.get(catId) ?? Number.MAX_SAFE_INTEGER;
+  const orderedCatIds = [...byCategory.keys()].sort(
+    (a, b) => rankOf(a) - rankOf(b) || a - b
+  );
+
   // Round-robin across categories -> balanced coverage
-  while (seen.size < CONFIG.DEFAULT_MATCH_SIZE && byCategory.size > 0) {
+  while (seen.size < CONFIG.DEFAULT_MATCH_SIZE && orderedCatIds.length > 0) {
     let addedAny = false;
-    for (const catId of [...byCategory.keys()]) {
+    for (const catId of [...orderedCatIds]) {
       const available = byCategory.get(catId)!;
       const candidate = available.find((q) => !seen.has(q.id));
       if (candidate) {
@@ -67,6 +83,7 @@ export async function selectQuestionsForMatch(
         if (seen.size >= CONFIG.DEFAULT_MATCH_SIZE) break;
       } else {
         byCategory.delete(catId);
+        orderedCatIds.splice(orderedCatIds.indexOf(catId), 1);
       }
     }
     if (!addedAny) break;

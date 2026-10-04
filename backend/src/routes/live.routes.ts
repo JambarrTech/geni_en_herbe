@@ -2,7 +2,7 @@ import { Router, type Response } from 'express';
 import { db } from '../db/index.ts';
 import { events } from '../db/schema.ts';
 import { desc, eq } from 'drizzle-orm';
-import { calculateRankings, getLiveState } from '../server/matchEngine.ts';
+import { calculateCategoryRankings, calculateRankings, getLiveState } from '../server/matchEngine.ts';
 import { validateIds } from '../lib/validate.ts';
 
 export const liveRouter = Router();
@@ -40,6 +40,20 @@ liveRouter.get('/api/rankings', async (_req, res: Response) => {
     res.json(rankings);
   } catch (error: any) {
     res.status(500).json({ error: 'Impossible de calculer le classement' });
+  }
+});
+
+// Classement par catégorie : chaque catégorie avec le podium des équipes sur
+// SES questions (matchs clôturés). Public comme /api/rankings : aucun secret,
+// que des totaux déjà diffusables.
+liveRouter.get('/api/rankings/by-category', async (_req, res: Response) => {
+  try {
+    const eventId = await resolveCurrentEventId(_req.query.eventId as string | undefined);
+    if (eventId == null) return res.json([]);
+    const rankings = await calculateCategoryRankings(eventId);
+    res.json(rankings);
+  } catch (error: any) {
+    res.status(500).json({ error: 'Impossible de calculer le classement par catégorie' });
   }
 });
 
