@@ -10,6 +10,30 @@ export interface MatchPoolRow {
 }
 
 /**
+ * Découpe la série d'un match dans un vivier DÉJÀ TRIÉ (cf. `sortPoolForMatch`).
+ * PURE ET TESTÉE : c'est elle qui garantit que l'écran public déroule la
+ * banque dans l'ordre des priorités — catégorie après catégorie, question
+ * après question — au lieu d'alterner entre catégories.
+ *
+ * Les questions déjà jouées dans l'événement (`usedIds`) sont sautées, jamais
+ * réutilisées ; `limit` tronque la fin de la série (une série courte joue le
+ * début des priorités : DUEL d'abord, pas un panaché).
+ */
+export function pickSeriesInPriorityOrder(
+  sorted: { id: number }[],
+  usedIds: Set<number>,
+  limit: number
+): number[] {
+  const picked: number[] = [];
+  for (const q of sorted) {
+    if (picked.length >= limit) break;
+    if (usedIds.has(q.id)) continue;
+    picked.push(q.id);
+  }
+  return picked;
+}
+
+/**
  * Trie le vivier de questions pour un match : catégorie d'abord (ordre
  * d'affichage décidé par l'admin), puis question dans sa catégorie, puis
  * identifiant (déterministe). PURE ET TESTÉE : l'ordre d'ouverture de l'écran
@@ -34,10 +58,14 @@ export function sortPoolForMatch(
 
 // Select questions for a match.
 // - If explicit ids are provided, they are validated (must exist) and kept in order.
-// - Otherwise the selection is balanced: active questions not already used in a
-//   match of the same event, picked round-robin across categories.
+// - Otherwise the series follows the admin priorities, exactly like the bank
+//   and the public screen: categories in display order (`position` decided by
+//   the committee, the first one opens the series), then questions in their
+//   category order. `matchQuestions.orderNumber` records that order, and the
+//   broadcast scenario walks it from the first to the last.
 // - `maxSize` caps the automatic pick (explicit ids are never truncated : when
 //   the committee chooses the series, it gets exactly what it chose).
+// - Questions already played in a match of the same event are never reused.
 export async function selectQuestionsForMatch(
   eventId: number,
   providedIds?: unknown,
@@ -77,10 +105,11 @@ export async function selectQuestionsForMatch(
     .from(questions)
     .where(eq(questions.active, true));
 
-  // Round-robin dans l'ordre d'affichage des catégories (`position`) : la
-  // catégorie que l'admin a placée en premier ouvre la série — donc l'écran
-  // public — et chaque catégorie est ensuite représentée à tour de rôle, dans
-  // l'ordre de SES questions. L'insertion triée garantit l'ordre des clés.
+  // Série dans l'ordre des priorités admin : la catégorie placée en premier
+  // ouvre la série — donc l'écran public — puis chaque catégorie déroule SES
+  // questions dans l'ordre configuré. Le même tri sert au bouton
+  // « réordonner » (`POST /:id/reorder-questions`) : création et
+  // réordonnancement produisent le même ordre, sans surprise.
   const catRanks = new Map(
     (
       await db
@@ -88,35 +117,10 @@ export async function selectQuestionsForMatch(
         .from(categories)
     ).map((c) => [c.id, c.position] as const)
   );
-  const byCategory = new Map<number, { id: number; categoryId: number }[]>();
-  for (const q of sortPoolForMatch(pool, catRanks)) {
-    if (usedIds.has(q.id)) continue;
-    if (!byCategory.has(q.categoryId)) byCategory.set(q.categoryId, []);
-    byCategory.get(q.categoryId)!.push(q);
-  }
+  const sorted = sortPoolForMatch(pool, catRanks);
 
-  const picked: number[] = [];
-  const seen = new Set<number>();
   const limit =
     Number.isInteger(maxSize) && maxSize > 0 ? Math.min(maxSize, 200) : CONFIG.DEFAULT_MATCH_SIZE;
 
-  // Round-robin across categories -> balanced coverage
-  while (seen.size < limit && byCategory.size > 0) {
-    let addedAny = false;
-    for (const catId of [...byCategory.keys()]) {
-      const available = byCategory.get(catId)!;
-      const candidate = available.find((q) => !seen.has(q.id));
-      if (candidate) {
-        seen.add(candidate.id);
-        picked.push(candidate.id);
-        addedAny = true;
-        if (seen.size >= limit) break;
-      } else {
-        byCategory.delete(catId);
-      }
-    }
-    if (!addedAny) break;
-  }
-
-  return picked.slice(0, limit);
+  return pickSeriesInPriorityOrder(sorted, usedIds, limit);
 }

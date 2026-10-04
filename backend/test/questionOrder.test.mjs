@@ -10,7 +10,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { sortPoolForMatch } from '../src/lib/selectQuestions.ts';
+import { pickSeriesInPriorityOrder, sortPoolForMatch } from '../src/lib/selectQuestions.ts';
 
 function row(id, categoryId, position) {
   return { id, categoryId, position };
@@ -65,5 +65,37 @@ test('le tableau d’entrée n’est pas muté', () => {
   assert.deepEqual(
     pool.map((q) => q.id),
     [2, 1]
+  );
+});
+
+test('la série déroule les catégories dans l’ordre des priorités, sans alterner', () => {
+  // Banque : catégorie 20 en premier (2 questions), puis catégorie 10.
+  // L’écran public doit jouer 20#1, 20#2 AVANT 10#1 — pas en alternance.
+  const sorted = sortPoolForMatch(
+    [row(1, 10, 1), row(2, 20, 1), row(3, 20, 2)],
+    ranks
+  );
+  assert.deepEqual(
+    pickSeriesInPriorityOrder(sorted, new Set(), 10),
+    [2, 3, 1]
+  );
+});
+
+test('une série courte joue le début des priorités (DUEL d’abord)', () => {
+  const sorted = sortPoolForMatch(
+    [row(1, 10, 1), row(2, 20, 1), row(3, 20, 2)],
+    ranks
+  );
+  assert.deepEqual(pickSeriesInPriorityOrder(sorted, new Set(), 2), [2, 3]);
+});
+
+test('les questions déjà jouées sont sautées, jamais réutilisées', () => {
+  const sorted = sortPoolForMatch(
+    [row(1, 10, 1), row(2, 20, 1), row(3, 20, 2)],
+    ranks
+  );
+  assert.deepEqual(
+    pickSeriesInPriorityOrder(sorted, new Set([2]), 10),
+    [3, 1]
   );
 });

@@ -183,9 +183,7 @@ async function timerLoopTick() {
   }
 }
 
-/**
- * Quitte l'étape `ROSTER` une fois son délai écoulé, pour le match concerné.
- // Recalculate match score purely from score_events
+// Recalculate match score purely from score_events
 export async function recalculateMatchScore(matchId: number) {  const eventsList = await db
     .select()
     .from(scoreEvents)

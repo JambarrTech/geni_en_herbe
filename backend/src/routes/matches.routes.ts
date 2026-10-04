@@ -269,7 +269,8 @@ matchesRouter.post('/', requireAuth, requireAdmin, adminWriteLimit, async (req: 
       })
       .returning();
 
-    // Sélection équilibrée des questions (validée / par catégorie), sans réutilisation.
+    // Série dans l'ordre des priorités admin (catégories puis questions),
+    // sans réutilisation des questions déjà jouées dans l'événement.
     // `matchSize` règle la longueur de la série (défaut : 10). Une liste
     // explicite `questionIds` n'est jamais tronquée : le comité obtient
     // exactement la série qu'il a composée.

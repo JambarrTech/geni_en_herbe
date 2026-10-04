@@ -20,11 +20,11 @@ const PROJECT_ROOT = path.resolve(currentDir, '..', '..', '..');
 // Deux rôles distincts pour le même processus, selon où sont les interfaces.
 //
 //   AUTO-HÉBERGÉ : les trois écrans sont servis ici, ET /api et /ws sont
-//   relayés. C'est le mode de développement et le déploiement.Render n'a pas
-//   plus ce rôle : les écrans y sont sur le CDN Vercel, et compiler les trois
-//   apps Vite pour un processus qui ne les sert pas coûtaient une minute de
-//   build et ~200 Mo par déploiement (cf. `render.yaml`, `rootDir: backend`).
-//   Il n'expose alors que `/api`, `/ws` et la sonde.
+//   relayés. C'est le mode du déploiement Render (mono-origine) : le build y
+//   compile les trois apps Vite (`npm run build`), et ce processus les sert
+//   depuis `apps/*/dist` sur la même origine que l'API et le WebSocket.
+//   RELAIS SEUL : aucun `dist` présent — seuls `/api`, `/ws` et les sondes
+//   sont exposés.
 //
 // Le mode se déduit des FICHIERS RÉELLEMENT présents, et non d'une convention :
 // c'est la seule information qui dise ce que ce processus peut faire, et elle
@@ -65,16 +65,16 @@ if (STATIC_SERVE_APPS === 'false') {
 } else if (manquants.length === 0) {
   mode = 'apps';
 } else if (presents.length === 0) {
-  // Aucun build : c'est l'état NORMAL de Render, donc ce n'est pas une
-  // anomalie. Logué en `info` et non en `warn` : un avertissement à chaque
-  // démarrage, dans un déploiement parfaitement sain, apprend à l'exploitant
-  // à ignorer les journaux — c'est-à-dire à ignorer le prochain, vrai.
+  // Aucun build : mode relais seul (développement sans `npm run build`, ou
+  // déploiement où les écrans sont servis ailleurs). Logué en `info` et non
+  // en `warn` : un avertissement à chaque démarrage, dans un déploiement
+  // sain, apprend à l'exploitant à ignorer les journaux — c'est-à-dire à
+  // ignorer le prochain, vrai.
   mode = 'relais';
   log.info(
-    "Mode relais seul : aucun build d'interface n'est présent. Les écrans sont " +
-      'servis par le CDN (cf. docs/DEPLOIEMENT-VERCEL.md) ; ce service expose ' +
-      '/api, /ws et la sonde.',
-    { ecrans: 'CDN', relais: '/api · /ws' }
+    "Mode relais seul : aucun build d'interface n'est présent. Ce service expose " +
+      '/api, /ws et les sondes.',
+    { ecrans: 'non servies ici', relais: '/api · /ws' }
   );
 } else {
   // Build partiel : jamais voulu. Servir deux écrans sur trois sans le dire
@@ -368,7 +368,7 @@ function notServed(res: http.ServerResponse) {
   res.end(
     mode === 'relais'
       ? "404 — ce service ne sert pas d'interface. Les écrans sont sur le CDN " +
-          "(/api et /ws restent joignables ici). Voir docs/DEPLOIEMENT-VERCEL.md."
+          "(/api et /ws restent joignables ici)."
       : '404 — build absent. Lancez `npm run build` à la racine.'
   );
 }
@@ -379,12 +379,11 @@ server.listen(PORT, '0.0.0.0', () => {
   log.info(`Point d'entrée sur http://0.0.0.0:${PORT}`, {
     mode: mode === 'apps' ? 'apps + relais' : 'relais seul',
     // En relais seul, annoncer les trois écrans serait une fausse promesse :
-    // c'est précisément la ligne qui ferait diagnostiquer le CDN à la place du
-    // service, dans le mauvais sens.
+    // c'est précisément la ligne qui ferait chercher la panne du mauvais côté.
     ecrans:
       mode === 'apps'
         ? '/ écran public · /jury · /admin'
-        : 'CDN Vercel (non servies ici)',
+        : 'non servies ici (relais /api + /ws seul)',
     api: API_TARGET,
     ws: WS_TARGET,
   });

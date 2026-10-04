@@ -249,6 +249,22 @@ describe('le pilotage de la diffusion atteint l\'écran public', () => {
     expect(screen.getByTestId('diffusion')).toHaveTextContent('REVEAL@5/10');
   });
 
+  test('un réordonnancement de série atteint l’écran public sans relecture réseau', () => {
+    const socket = monter();
+    const getApi = vi.mocked(api.get);
+    const lecturesAvant = getApi.mock.calls.length;
+
+    // Le comité réordonne la série d'un match non démarré (bouton admin
+    // « réordonner selon les priorités »). Sans `questions_reordered` dans la
+    // liste des messages traités, l'écran restait figé sur l'ancien ordre
+    // jusqu'au prochain événement — sans aucun signal d'écart.
+    diffuser(socket, 'broadcast_step', matchEnDiffusion('QUESTION', 2));
+    diffuser(socket, 'questions_reordered', matchEnDiffusion('QUESTION', 1));
+
+    expect(getApi.mock.calls.length).toBe(lecturesAvant);
+    expect(screen.getByTestId('diffusion')).toHaveTextContent('QUESTION@1/10');
+  });
+
   test('un type inconnu ne fait pas non plus bouger le scénario', () => {
     const socket = monter();
 

@@ -28,7 +28,7 @@ un redéploiement de l'un n'affecte pas les autres.
 | `api`       | 4000  | Routes REST `/api`                            | `GET /api/health`        |
 | `ws`        | 4001  | Diffusion temps réel `/ws`                    | `GET /`                  |
 | `worker`    | 4002  | Boucle de chrono (tâche de fond, ~1 s)         | `GET /`                  |
-| `static`    | 4003  | Reverse proxy `/api` + `/ws`, **et** `apps/*/dist` s'il en existe — voir ci-dessous | `GET /__static_health`   |
+| `static`    | 4003  | Reverse proxy `/api` + `/ws`, **et** `apps/*/dist` s'il en existe — voir ci-dessous | `GET /health` (état global : API+WS+worker+DB) et `GET /__static_health` (sonde légère du seul `static`) |
 
 `static` a deux rôles selon l'installation : il **sert les trois écrans** et
 relaie `/api` + `/ws` quand `apps/*/dist` est présent — c'est l'état du

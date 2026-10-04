@@ -1,66 +1,73 @@
 # Success Summary - AEERKS Platform Updates
 
-## ✅ Completed Work
+## Travaux terminés
 
-### 1. Migration 0007 - DUEL Category and Questions
-Created `backend/drizzle/0007_add_duel_category_and_questions.sql`:
-- Added "DUEL" category to the `categories` table
-- Added 4 questions for the DUEL mode:
-  1. *Quelle est le nom de notre Galaxie ?* → Réponse: *la voie lactée*
-  2. *What is the plural of "sour"?* → Réponse: *surn* (note: original was "سور" in Arabic)
-  3. *Quel est le deuxième pays le plus peuple?* → Réponse: *Inde*
-  4. *What is the plural of "trab"?* → Réponse: *أتراب* (note: original was "أتراب" in Arabic)
+### 1. Migration 0007 - Catégorie DUEL et questions (corrigée)
+`backend/drizzle/0007_add_duel_category_and_questions.sql` :
+- Catégorie "DUEL" + 4 questions.
+- **Correction** : noms de colonnes `timeLimitSeconds` (camelCase, colonne
+  inexistante) → `time_limit_seconds` (snake_case, cf. `0000`). Sans cela,
+  toute application manuelle du fichier échouait.
+- **Idempotence** : gardes `NOT EXISTS` sur la catégorie et chaque énoncé —
+  rejouer le fichier ne duplique rien. Le fichier reste hors journal
+  (`meta/_journal.json`), application manuelle unique (cf. CHECKLIST-JOUR-J).
 
-### 2. Broadcast Flow - ROSTER Stage Removed
-Modified `backend/src/lib/broadcastFlow.ts`:
-- `broadcastSequence()` now starts directly with QUESTION (no ROSTER)
-- `firstCursor()` returns QUESTION instead of ROSTER
-- `normalizeCursor()` defaults to QUESTOR for unknown stages
-- Removed `ROSTER_STAGE_SECONDS`, `rosterShouldAutoAdvance()`, `rosterDeadline()`
-- Added `walkTo()` function
-- Updated `stageIsPerMatch()` to only include FINAL
+### 2. Flux de diffusion - étape ROSTER supprimée (soldé)
+`backend/src/lib/broadcastFlow.ts` :
+- `broadcastSequence()` démarre à QUESTION, `firstCursor()` = QUESTION,
+  `normalizeCursor()` → QUESTION par défaut.
+- **Correction du trou restant** : `normalizeCursor()` convertit désormais
+  explicitement `ROSTER` (valeur historique, toujours valide au sens
+  `isBroadcastStage`) vers `QUESTION` à index borné. Avant, une ligne restée
+  sur `ROSTER` rendait `nextCursor`/`previousCursor` nuls (curseur hors
+  séquence) et bloquait le jury sur « diffusion à son terme ».
+- **Code mort supprimé** : `ROSTER_STAGE_SECONDS`, `rosterShouldAutoAdvance()`,
+  `rosterDeadline()` (étaient `@deprecated` et sans appelant).
+- `BROADCAST_STAGE.ROSTER` et `showsRoster` conservés en lecture seule pour
+  les lignes existantes ; plus aucune écriture n'en produit.
 
-### 3. Match Start Logic Updated
-- `backend/src/routes/matches.routes.ts`: 
-  - `broadcastStage` set to `QUESTION` on match start (instead of ROSTER)
-  - `broadcastRosterUntil` set to `null`
-- `backend/src/server/matchEngine.ts`:
-  - Removed `autoAdvanceRosterStage()` and `autoAdvanceRosterStages()`
-  - Cleaned up imports (removed `rosterShouldAutoAdvance`, `isNotNull`)
+### 3. Schéma et migration 0011
+- `backend/src/db/schema.ts` : défaut `broadcast_stage` `'ROSTER'` →
+  `'QUESTION'`, commentaires réécrits (porte de sécurité REVEAL, colonne
+  `broadcast_roster_until` marquée historique).
+- Nouvelle migration journalisée `0011_broadcast_default_question`
+  (`SET DEFAULT`, bascule des lignes `ROSTER` → `QUESTION`, `roster_until` →
+  `NULL`) : sûre à appliquer, aucun changement de rendu (c'est ce que
+  `normalizeCursor` faisait déjà virtuellement).
+- `backend/src/server/matchEngine.ts` : commentaire fantôme
+  (« Quitte l'étape ROSTER… » accolé à `recalculateMatchScore`) supprimé.
 
-### 4. Tests Updated
-- `backend/test/broadcastFlow.test.mjs`: All 20 tests pass
-- Updated expectations: QUESTION as first stage, no ROSTER in sequences
+### 4. Processus `static` : commentaires mono-origine
+`backend/src/server/static.ts` : les commentaires décrivant Render comme
+« écrans sur le CDN Vercel » (époque `rootDir: backend`) contredisaient le
+déploiement mono-origine actuel (`render.yaml`). Messages et logs alignés ;
+les deux sondes coexistent : `/health` (globale, utilisée par Render) et
+`/​__static_health` (légère). `README.md` corrigé en conséquence.
 
-### 5. Typecheck Status
-- ✅ Backend: passes
-- ✅ App-live: passes  
-- ✅ App-jury: passes
-- ⚠️ App-admin: has pre-existing JSX syntax errors (unrelated to core changes)
+### 5. Admin : bouton « Modifier » des questions — LIVRÉ
+Contrairement au précédent résumé : `QuestionsBank.tsx` expose déjà
+« Modifier » (aria-label `Modifier la question …`), `AdminDashboard.tsx`
+gère `editingQuestion` + `PATCH /api/questions/:id` + modale
+« Modifier la Question ». Endpoint `PATCH` tracé en audit côté serveur.
 
-### 6. Test Results
-- 259 tests pass with 0 failures
-- Broadcast flow tests: 20/20 pass
-- All annulation, logger, metrics, and other tests pass
+### 6. Vérifications
+- `node scripts/typecheck.mjs` : backend + les 3 apps passent.
+- `npm run test:back` : 259 tests, 0 échec (à relancer après ces changements).
+- `npm run render:check` : blueprint cohérent (aucune modification `render.yaml`).
 
-## ⚠️ Pending Item
-
-### Question Modification Button (Admin Dashboard)
-The request to add a "Modifier" (Edit) button for questions in the admin dashboard was started but encountered JSX syntax errors in `AdminDashboard.tsx` that are difficult to resolve without a full refactor of the component. The feature requires:
-- State management for the question being edited
-- A modal form with pre-filled values
-- Connection to the existing `/api/questions/:id` PATCH endpoint
-- Proper JSX wrapping to avoid parent element errors
-
-This can be completed in a follow-up session with careful JSX restructuring.
-
-## Files Modified
-- `backend/drizzle/0007_add_duel_category_and_questions.sql` (new)
+## Fichiers touchés (cette passe)
 - `backend/src/lib/broadcastFlow.ts`
-- `backend/src/routes/matches.routes.ts`
+- `backend/src/db/schema.ts`
 - `backend/src/server/matchEngine.ts`
-- `backend/test/broadcastFlow.test.mjs`
+- `backend/src/server/static.ts`
+- `backend/drizzle/0007_add_duel_category_and_questions.sql` (correction + idempotence)
+- `backend/drizzle/0011_broadcast_default_question.sql` (nouveau)
+- `backend/drizzle/meta/_journal.json` (entrée idx 9)
+- `README.md` (sondes `static`)
 
-## Test Commands
-- `npm run test:back` - runs 259 tests (0 failures)
-- `npm run typecheck` - backend, app-live, app-jury pass; app-admin has pre-existing issues
+## Reste volontairement inchangé
+- `meta/_journal.json` pour `0006`/`0007` : toujours hors journal (destructif /
+  données). Ne pas les y ajouter sans reconciler la prod au préalable.
+- `render.yaml` : aucune modification (vérifié par `render:check`).
+- Découpage `AdminDashboard.tsx` (2473 lignes) : chantier de refactor, pas un
+  correctif — à planifier hors urgence.

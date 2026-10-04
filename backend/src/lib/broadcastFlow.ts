@@ -6,11 +6,16 @@
  * L'écran public ne montre pas « l'état » d'un match : il déroule une
  * SCÉNARISATION que le jury avance d'un cran à la fois, devant le public.
  *
- *   Participants -> Question -> Équipe A -> Équipe B -> Révélation
- *                                                     |
- *                          (on repasse à « Question » pour la suivante)
- *                                                     v
- *                                            Résultats finaux
+ *   Question -> Équipe A -> Équipe B -> Révélation
+ *                                |
+ *     (on repasse à « Question » pour la suivante)
+ *                                v
+ *                       Résultats finaux
+ *
+ * L'étape `ROSTER` (effectif des équipes) a été supprimée du scénario : le
+ * match démarre directement sur la première question. La valeur reste connue
+ * de `BROADCAST_STAGE` pour les lignes existantes en base (compatibilité),
+ * mais `normalizeCursor` la ramène vers `QUESTION`.
  *
  * Cette sequencing est la seule chose qui décide, à un instant donné, de ce que
  * voit le public — et donc de ce qui est envoyé dans le payload : la réponse
@@ -31,7 +36,13 @@
 
 /** Étapes possibles de la diffusion, dans l'ordre du déroulé. */
 export const BROADCAST_STAGE = {
-  /** Effectif des deux équipes à l'écran. */
+  /**
+   * Effectif des deux équipes à l'écran — ÉTAPE SUPPRIMÉE du scénario.
+   * Conservée ici pour les lignes existantes en base : `normalizeCursor`
+   * la convertit en `QUESTION`, et `showsRoster` ne peut plus devenir vrai
+   * via une nouvelle écriture (les routes écrivent `QUESTION` au démarrage
+   * et `broadcastRosterUntil` à `null` à chaque pas).
+   */
   ROSTER: 'ROSTER',
   /** Énoncé de la question courante. */
   QUESTION: 'QUESTION',
@@ -129,8 +140,12 @@ export function broadcastSequence(questionCount: number): BroadcastCursor[] {
 /**
  * Ramène un curseur, quelle que soit sa valeur, dans le scénario réellement jouable.
  *
- * Trois corrections, chacune tirée d'un incident possible :
+ * Quatre corrections, chacune tirée d'un incident possible :
  *  - étape inconnue -> `QUESTION` (cf. `isBroadcastStage`) ;
+ *  - étape `ROSTER` (supprimée du scénario) -> `QUESTION`, index conservé et
+ *    borné : sans cela, une ligne existante restée sur `ROSTER` rendait
+ *    `nextCursor`/`previousCursor` nuls (curseur hors séquence) et le jury
+ *    restait bloqué sur « diffusion à son terme » ;
  *  - index hors bornes -> ramené dans la série, parce qu'une série raccourcie
  *    (question supprimée en cours de concours) laisse derrière elle un index
  *    qui ne désigne plus rien ;
@@ -151,6 +166,9 @@ export function normalizeCursor(
 
   const rawIndex = Number.isFinite(questionIndex) ? Math.floor(questionIndex as number) : 0;
   const clamped = Math.min(Math.max(rawIndex, 0), count - 1);
+  if (stage === BROADCAST_STAGE.ROSTER) {
+    return { stage: BROADCAST_STAGE.QUESTION, questionIndex: clamped };
+  }
   return { stage: isBroadcastStage(stage) ? stage : BROADCAST_STAGE.QUESTION, questionIndex: clamped };
 }
 
@@ -231,80 +249,6 @@ export function stageIsPerMatch(stage: BroadcastStage): boolean {
   return stage === BROADCAST_STAGE.FINAL;
 }
 
-/**
- * Durée d'affichage de l'effectif des équipes avant bascule sur la question.
- *
- * L'effectif est la SEULE étape minutée du scénario. Toutes les autres attendent
- * le jury, parce que c'est lui qui parle à ce moment-là : le laisser seul devant
- * l'écran pendant une réponse prendrait le contrôle de son propre match.
- *
- * Au lancement en revanche, personne n'a encore pris la main — le jury vient
- * d'appuyer sur « Démarrer » et se tourne vers le micro. Sans bascule
- * automatique, il faut revenir sur l'ordinateur pendant qu'il annonce le match,
- * et l'oubli est banal.
- *
- * Vingt secondes : de quoi lire une dizaine de noms à voix haute sans hâter. Une
- * valeur plus courte couperait la présentation ; une plus longue laisserait un
- * écran figé que personne n'ose interrompre.
- *
- * @deprecated L'étape ROSTER a été supprimée. Cette constante n'est plus utilisée.
- */
-export const ROSTER_STAGE_SECONDS = 20;
-
-/**
- * Faut-il quitter l'effectif des équipes maintenant ?
- *
- * PURE ET SANS HORLOGE : l'instant courant est fourni en paramètre. C'est ce qui
- * rend la décision testable — et elle mérite de l'être, parce que la condition
- * « l'étape vaut ROSTER ET l'échéance est dépassée » est exactement le genre de
- * double condition dont un des deux termes s'oublie en route.
- *
- * Le second terme n'est pas une précaution : il porte l'invariant du stockage.
- * L'échéance est effacée dès que le curseur quitte l'effectif, donc une
- * échéance périmée ne devrait jamais coexister avec une autre étape. Si elle le
- * fait quand même — ligne écrite à la main, course entre deux processus, déploiement
- * à moitié appliqué — le bon comportement est de NE PAS basculer : sans échéance,
- * on ne peut rien décider, et décider quand même reviendrait à faire avancer un
- * écran sur une hypothèse.
- *
- * Conséquence directe, et elle est voulue : revenir sur l'effectif au bouton
- * « retour » du jury n'est JAMAIS neutralisé par une bascule automatique. C'est
- * le jury qui décide si ce retour doit tenir.
- *
- * @deprecated L'étape ROSTER a été supprimée. Cette fonction n'est plus utilisée.
- */
-export function rosterShouldAutoAdvance(input: {
-  /**
-   * Étape courante, telle que stockée — donc du texte brut, pas un `BroadcastStage`.
-   *
-   * Typée ainsi à dessein : la colonne est du texte libre en base (cf.
-   * `isBroadcastStage`), et la comparaison doit rester possible depuis la route
-   * comme depuis la boucle serveur sans passage obligé par un narrowing. Une
-   * étape inconnue n'est pas `ROSTER`, donc aucune bascule — c'est le
-   * comportement sûr pour une valeur corrompue.
-   */
-  stage: string | null | undefined;
-  rosterUntil: Date | null | undefined;
-  now: Date;
-}): boolean {
-  if (input.stage !== BROADCAST_STAGE.ROSTER) return false;
-  if (!input.rosterUntil) return false;
-  return input.now.getTime() >= new Date(input.rosterUntil).getTime();
-}
-
-/**
- * Échéance de sortie de l'effectif, ou `null` si l'étape n'en a pas.
- *
- * On retourne la date plutôt qu'un booléen pour que l'appelant ne puisse pas
- * écrire `broadcastRosterUntil = null` en croyant avoir armé le minutage : la
- * signature rend l'oubli visible.
- *
- * @deprecated L'étape ROSTER a été supprimée. Cette fonction n'est plus utilisée.
- */
-export function rosterDeadline(now: Date): Date {
-  return new Date(now.getTime() + ROSTER_STAGE_SECONDS * 1000);
-}
-
 /** Action demandée par le jury sur la diffusion. */
 export type BroadcastAction = 'next' | 'previous' | 'restart';
 
@@ -344,15 +288,16 @@ export type TimerStepUpdate = {
  * décompte.
  *
  * Il en découle que le moment où le chrono part doit être celui où le public voit
- * la question — pas celui où la machine a démarré. Et le lancement du match ouvre
- * sur l'effectif des équipes : un chrono armé à cet instant se consume pendant la
- * présentation, et il est à zéro avant que la question 1 ne soit lue.
+ * la question — pas celui où la machine a démarré. Le lancement du match ouvre
+ * directement sur la première question (`QUESTION`), donc le chrono s'arme dès
+ * que cette étape est atteinte avec une question jamais jouée.
  *
  * D'où les deux décisions ci-dessous.
  *
- * 1. Le chrono s'arme sur l'ÉTAPE `QUESTION`, pas sur un changement d'index. Le
- *    passage `ROSTER` → `QUESTION` porte sur la question 0, donc sur le même
- *    index qu'au lancement, et `questionChanged` y vaut `false` : conditionner
+ * 1. Le chrono s'arme sur l'ÉTAPE `QUESTION`, pas sur un changement d'index.
+ *    Historiquement, le lancement ouvrait sur l'effectif des équipes (`ROSTER`)
+ *    et le passage `ROSTER` → `QUESTION` portait sur la question 0, donc sur le
+ *    même index qu'au lancement (`questionChanged === false`) : conditionner
  *    l'armement à `questionChanged` laissait le chrono filer pendant toute la
  *    présentation des équipes. Le symptôme n'était visible d'aucune façon — pas
  *    d'erreur, pas de journal : un compteur simplement trop bas.

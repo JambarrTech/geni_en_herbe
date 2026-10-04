@@ -175,8 +175,9 @@ export const AdminDashboard: React.FC = () => {
   const [newMatchNumber, setNewMatchNumber] = useState(1);
   const [newMatchTeamA, setNewMatchTeamA] = useState<number | ''>('');
   const [newMatchTeamB, setNewMatchTeamB] = useState<number | ''>('');
-  // Longueur de la série (sélection automatique équilibrée). 10 par défaut :
-  // relever pour faire jouer toute la banque dans l'ordre des priorités.
+  // Longueur de la série (ordre des priorités admin : catégories puis
+  // questions). 10 par défaut : relever pour faire jouer toute la banque
+  // dans l'ordre affiché ci-dessus.
   const [newMatchSize, setNewMatchSize] = useState<number>(APP_CONFIG.DEFAULT_MATCH_SIZE);
 
   // Confirmations d'actions à conséquence officielle. Auparavant, ces actions
@@ -2085,7 +2086,7 @@ export const AdminDashboard: React.FC = () => {
                   className="w-full p-2.5 rounded-xl border border-slate-300 text-xs text-slate-800 font-bold"
                 />
                 <p className="text-[11px] text-slate-400 mt-1">
-                  Série équilibrée par catégories, dans l'ordre des priorités. Relever pour faire jouer toute la banque.
+                  Série dans l'ordre des priorités (catégories puis questions). Relever pour faire jouer toute la banque.
                 </p>
               </div>
               <div className="flex justify-end gap-2 pt-2">

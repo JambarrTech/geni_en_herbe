@@ -73,6 +73,18 @@ describe('normalizeCursor', () => {
     assert.deepEqual(normalizeCursor('QUESTION', 5, 3), { stage: 'QUESTION', questionIndex: 2 });
     assert.deepEqual(normalizeCursor('QUESTION', -1, 3), { stage: 'QUESTION', questionIndex: 0 });
   });
+
+  test('ROSTER historique est ramene vers QUESTION (index conserve et borne)', () => {
+    assert.deepEqual(normalizeCursor('ROSTER', 1, 3), { stage: 'QUESTION', questionIndex: 1 });
+    assert.deepEqual(normalizeCursor('ROSTER', 9, 3), { stage: 'QUESTION', questionIndex: 2 });
+  });
+
+  test('un curseur ROSTER normalise permet au jury d avancer (pas de blocage)', () => {
+    const current = normalizeCursor('ROSTER', 0, 2);
+    const next = nextCursor(current, 2);
+    assert.equal(next.stage, 'ANSWER_A');
+    assert.equal(next.questionIndex, 0);
+  });
 });
 
 describe('nextCursor', () => {
