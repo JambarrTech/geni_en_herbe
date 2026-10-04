@@ -162,6 +162,7 @@ export const LiveProvider: React.FC<LiveProviderProps> = ({ children, sendToken 
             setTimerRunning(false);
           } else if (
             message.type === 'score_updated' ||
+            message.type === 'score_diffused' ||
             message.type === 'question_changed' ||
             message.type === 'timer_synced' ||
             message.type === 'match_started' ||

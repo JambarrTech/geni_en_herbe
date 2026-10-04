@@ -9,8 +9,8 @@ import {
   questions,
   categories,
 } from '../db/schema.ts';
-import { eq, desc, inArray } from 'drizzle-orm';
-import { type TeamRanking, type LiveStatePayload, type CategoryRankings } from '../types.ts';
+import { and, eq, desc, inArray } from 'drizzle-orm';
+import { type TeamRanking, type LiveStatePayload, type CategoryRankings, type DiffusedScore } from '../types.ts';
 import { publicQuestion, revealedQuestion } from '../lib/sanitize.ts';
 import {
   broadcastPosition,
@@ -474,6 +474,124 @@ export async function calculateCategoryRankings(eventId: number): Promise<Catego
   return aggregateCategoryStandings(allTeams, allCategories, rows);
 }
 
+// Ligne de journal exploitable pour l'écran public : identifiant,
+// équipe et points — le reste (nom d'équipe, question) est résolu à la lecture.
+export interface PublicScoreEvent {
+  id: number;
+  teamId: number;
+  points: number;
+}
+
+/**
+ * Totaux approuvés par le jury : somme des événements jusqu'au marqueur de
+ * diffusion inclus — et RIEN si le marqueur est nul. Même plancher que le
+ * recalcul officiel (`Math.max(0, …)`) pour que l'écran ne montre jamais un
+ * score que le match n'affiche pas.
+ *
+ * Le `null` strict est volontaire : un marqueur absent ne doit pas « tout
+ * inclure par défaut », sinon les vrais totaux partiraient au public dans le
+ * payload au moment même où l'écran les masque.
+ */
+export function sumEventsUpTo(
+  events: PublicScoreEvent[],
+  upToId: number | null,
+  teamAId: number,
+  teamBId: number
+): { scoreA: number; scoreB: number } {
+  let totalA = 0;
+  let totalB = 0;
+  if (upToId === null) return { scoreA: 0, scoreB: 0 };
+  for (const e of events) {
+    if (e.id > upToId) continue;
+    if (e.teamId === teamAId) totalA += e.points;
+    else if (e.teamId === teamBId) totalB += e.points;
+  }
+  return { scoreA: Math.max(0, totalA), scoreB: Math.max(0, totalB) };
+}
+
+/**
+ * L'écran public doit-il masquer les scores de ce match ?
+ *
+ * - match terminé : non, les totaux réels sont affichés (l'écran de fin et
+ *   la publication officielle prennent le relais) ;
+ * - aucun point attribué : non, 0-0 n'a rien à cacher ;
+ * - sinon : seulement si chaque point attribué a été diffusé. Un seul
+ *   événement postérieur au marqueur, et l'écran masque — c'est le jury qui
+ *   décide du moment, pas l'attribution.
+ */
+export function isScoreHidden(
+  status: string,
+  eventIds: number[],
+  diffusedEventId: number | null
+): boolean {
+  if (status === FLOW.MATCH_STATUS.FINISHED) return false;
+  if (eventIds.length === 0) return false;
+  if (diffusedEventId == null) return true;
+  return eventIds.some((id) => id > diffusedEventId);
+}
+
+/**
+ * Annonce de points telle que le public a le droit de la voir, ou `null`.
+ *
+ * `null` dans trois cas, tous voulus : aucun marqueur (rien diffusé), marqueur
+ * inconnu (événement supprimé ou d'un autre match — on n'invente pas une
+ * annonce), match sans cet événement. Un marqueur corrompu masque donc les
+ * scores au lieu d'en afficher de faux (cf. `isScoreHidden`).
+ */
+export async function getDiffusedScore(match: {
+  id: number;
+  teamAId: number;
+  teamBId: number;
+  diffusedScoreEventId: number | null;
+}): Promise<DiffusedScore | null> {
+  const eventId = match.diffusedScoreEventId;
+  if (!eventId) return null;
+
+  const [ev] = await db
+    .select({
+      id: scoreEvents.id,
+      teamId: scoreEvents.teamId,
+      points: scoreEvents.points,
+      type: scoreEvents.type,
+      reason: scoreEvents.reason,
+      questionId: scoreEvents.questionId,
+      createdAt: scoreEvents.createdAt,
+    })
+    .from(scoreEvents)
+    .where(and(eq(scoreEvents.id, eventId), eq(scoreEvents.matchId, match.id)))
+    .limit(1);
+  if (!ev) return null;
+
+  const [team] = await db
+    .select({ name: teams.name, code: teams.code })
+    .from(teams)
+    .where(eq(teams.id, ev.teamId))
+    .limit(1);
+
+  let questionIndex: number | null = null;
+  if (ev.questionId) {
+    const [mq] = await db
+      .select({ orderNumber: matchQuestions.orderNumber })
+      .from(matchQuestions)
+      .where(and(eq(matchQuestions.matchId, match.id), eq(matchQuestions.questionId, ev.questionId)))
+      .limit(1);
+    if (mq) questionIndex = mq.orderNumber - 1;
+  }
+
+  return {
+    eventId: ev.id,
+    teamId: ev.teamId,
+    teamName: team?.name ?? 'Équipe',
+    teamCode: team?.code ?? '',
+    points: ev.points,
+    type: ev.type,
+    reason: ev.reason,
+    questionId: ev.questionId,
+    questionIndex,
+    createdAt: ev.createdAt instanceof Date ? ev.createdAt.toISOString() : String(ev.createdAt),
+  };
+}
+
 // Prepare comprehensive Live State payload.
 // Le calcul du classement coûte plusieurs requêtes : il n'est inclus que lorsqu'il
 // change (clôture d'un match, publication) ou quand il est explicitement demandé.
@@ -652,12 +770,50 @@ export async function getLiveState(eventId?: number, includeRankings = false): P
       if (teamB) teamBOut = { ...teamB, members: rosters.get(teamB.id) ?? [] };
     }
 
+    // Points visibles par le public : JAMAIS les totaux en direct pendant le
+    // match. Seuls les points diffusés par le jury (ou l'admin) partent sur
+    // l'écran — voir `diffused_score_event_id` (migration 0009). Un point
+    // attribué puis non diffusé reste invisible : le marqueur prend du retard
+    // et l'écran montre les derniers totaux approuvés, ou masque tout s'il
+    // n'y en a aucun.
+    const publicEvents = await db
+      .select({ id: scoreEvents.id, teamId: scoreEvents.teamId, points: scoreEvents.points })
+      .from(scoreEvents)
+      .where(eq(scoreEvents.matchId, activeMatchRaw.id));
+    const publicEventIds = publicEvents.map((e) => e.id);
+    const scoresHidden = isScoreHidden(
+      activeMatchRaw.status,
+      publicEventIds,
+      activeMatchRaw.diffusedScoreEventId ?? null
+    );
+    const approved = sumEventsUpTo(
+      publicEvents,
+      activeMatchRaw.diffusedScoreEventId ?? null,
+      activeMatchRaw.teamAId,
+      activeMatchRaw.teamBId
+    );
+    const diffusedScore = scoresHidden
+      ? null
+      : await getDiffusedScore({
+          id: activeMatchRaw.id,
+          teamAId: activeMatchRaw.teamAId,
+          teamBId: activeMatchRaw.teamBId,
+          diffusedScoreEventId: activeMatchRaw.diffusedScoreEventId ?? null,
+        });
+
     activeMatch = {
       ...activeMatchRaw,
       teamA: teamAOut,
       teamB: teamBOut,
       currentQuestion,
       matchQuestions: mQuestions,
+      // Totaux publics : les vrais totaux quand rien ne les cache, les totaux
+      // approuvés sinon. `scoresHidden` dit à l'écran lequel des deux il
+      // montre — sans lui, un 0-0 approuvé serait indiscernable d'un masquage.
+      scoreA: scoresHidden ? approved.scoreA : activeMatchRaw.scoreA,
+      scoreB: scoresHidden ? approved.scoreB : activeMatchRaw.scoreB,
+      scoresHidden,
+      diffusedScore,
       // Scénario dérivé, transmis tel quel : ni l'écran public ni le tableau de
       // jury n'ont à recalculer la position, et les deux affichent donc
       // exactement la même étape.

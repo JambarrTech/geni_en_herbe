@@ -206,6 +206,16 @@ export const matches = pgTable(
     // un melange de `timestamp` et `timestamptz` dans une meme table rendrait
     // cette comparaison dependante d'un decalage silencieux.
     broadcastRosterUntil: timestamp('broadcast_roster_until'),
+    // Dernier événement de score que le public a le droit de voir (cf.
+    // migration 0009). `null` = rien n'a été diffusé : pendant le match,
+    // l'écran masque les scores dès qu'un point est attribué, jusqu'à ce que
+    // le jury (ou l'admin) diffuse explicitement.
+    //
+    // Entier simple SANS clé étrangère, volontairement : `score_events` est
+    // déjà en ON DELETE CASCADE depuis `matches`, et une FK croisée rendrait
+    // la suppression d'un match dépendante de l'ordre de suppression des
+    // événements. L'appartenance au match est vérifiée en code.
+    diffusedScoreEventId: integer('diffused_score_event_id'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },

@@ -1,0 +1,16 @@
+-- Annonce des points diffusée à l'écran public.
+--
+-- Pendant le match, les points attribués ne partent PAS tout seuls sur
+-- l'écran public : c'est le jury (ou un administrateur, depuis la table du
+-- jury) qui décide du moment, via `POST /api/matches/:id/diffuse-score`.
+-- Cette colonne désigne le DERNIER événement de score que le public a le
+-- droit de voir. Tout événement postérieur reste masqué jusqu'à la prochaine
+-- diffusion — sans aucune remise à zéro à gérer : le marqueur prend
+-- simplement du retard, et l'écran montre les totaux approuvés.
+--
+-- Entier SIMPLE, sans clé étrangère : `matches` référence déjà
+-- `score_events` en cascade inverse (suppression du match), et une FK croisée
+-- rendrait la suppression du match dépendante de l'ordre de suppression des
+-- événements. L'appartenance de l'événement au match est vérifiée en code
+-- (route `diffuse-score`), pas par la contrainte.
+ALTER TABLE "matches" ADD COLUMN "diffused_score_event_id" integer;

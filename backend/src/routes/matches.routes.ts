@@ -16,6 +16,8 @@ import {
   getLiveState,
   broadcast,
   logAudit,
+  getDiffusedScore,
+  isScoreHidden,
 } from '../server/matchEngine.ts';
 import { publicQuestion } from '../lib/sanitize.ts';
 import { getSetting } from '../lib/settings.ts';
@@ -191,6 +193,19 @@ matchesRouter.get('/:id', requireAuth, requireJuryOrAdmin, async (req: AuthReque
       currentQuestion,
       matchQuestions: parsedQuestions,
       scoreEvents: scores,
+      // Ce que le public voit des points : l'annonce diffusée (ou rien) et
+      // l'indicateur de masquage. Le jury pilote les deux depuis sa table.
+      diffusedScore: await getDiffusedScore({
+        id,
+        teamAId: match.teamAId,
+        teamBId: match.teamBId,
+        diffusedScoreEventId: match.diffusedScoreEventId ?? null,
+      }),
+      scoresHidden: isScoreHidden(
+        match.status,
+        scores.map((s) => s.id),
+        match.diffusedScoreEventId ?? null
+      ),
     });
   } catch (error: any) {
     res.status(500).json({ error: 'Erreur lors du chargement du match' });
@@ -913,6 +928,98 @@ matchesRouter.post('/:id/score', requireAuth, requireJuryOrAdmin, scoreLimit, as
   }
 });
 
+// Diffusion des points à l'écran public (jury ou admin, depuis la table du jury).
+//
+// Pendant le match, les points attribués NE partent PAS tout seuls sur
+// l'écran : les totaux publics restent figés sur la dernière diffusion, puis
+// masqués dès qu'un nouveau point est attribué. Cette route pose le marqueur
+// `diffused_score_event_id` sur le dernier événement (ou celui demandé) : à
+// partir de là — et seulement là — le public voit les totaux et l'annonce.
+matchesRouter.post('/:id/diffuse-score', requireAuth, requireJuryOrAdmin, controlLimit, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const [match] = await db.select().from(matches).where(eq(matches.id, id));
+    if (!match) return res.status(404).json({ error: 'Match non trouvé' });
+
+    // Diffuser n'a de sens que pendant ou juste après le match : avant le
+    // lancement il n'y a rien à montrer, après annulation plus rien à diffuser.
+    if (
+      match.status !== FLOW.MATCH_STATUS.LIVE &&
+      match.status !== FLOW.MATCH_STATUS.PAUSED &&
+      match.status !== FLOW.MATCH_STATUS.FINISHED
+    ) {
+      return res.status(400).json({ error: 'Diffusion impossible : match non démarré ou annulé' });
+    }
+
+    const { scoreEventId } = req.body;
+    let targetId: number | null = null;
+    if (scoreEventId !== undefined && scoreEventId !== null) {
+      const parsed = parseInt(scoreEventId, 10);
+      if (!Number.isInteger(parsed) || parsed <= 0) {
+        return res.status(400).json({ error: 'Identifiant d\'événement invalide' });
+      }
+      const [ev] = await db
+        .select({ id: scoreEvents.id })
+        .from(scoreEvents)
+        .where(and(eq(scoreEvents.id, parsed), eq(scoreEvents.matchId, id)))
+        .limit(1);
+      if (!ev) {
+        return res.status(404).json({ error: 'Événement de score introuvable pour ce match' });
+      }
+      targetId = ev.id;
+    } else {
+      const [latest] = await db
+        .select({ id: scoreEvents.id })
+        .from(scoreEvents)
+        .where(eq(scoreEvents.matchId, id))
+        .orderBy(desc(scoreEvents.id))
+        .limit(1);
+      if (!latest) {
+        return res.status(400).json({ error: 'Aucun point attribué à diffuser pour ce match' });
+      }
+      targetId = latest.id;
+    }
+
+    await db
+      .update(matches)
+      .set({ diffusedScoreEventId: targetId, updatedAt: new Date() })
+      .where(eq(matches.id, id));
+
+    const diffused = await getDiffusedScore({
+      id,
+      teamAId: match.teamAId,
+      teamBId: match.teamBId,
+      diffusedScoreEventId: targetId,
+    });
+
+    await logAudit(
+      req.user?.uid,
+      req.user?.email,
+      'DIFFUSE_SCORE',
+      'match',
+      String(id),
+      diffused
+        ? `Points diffusés à l'écran : ${diffused.points > 0 ? '+' : ''}${diffused.points} pts pour ${diffused.teamName} (événement ${diffused.eventId})`
+        : `Diffusion des points à l'écran (événement ${targetId})`
+    );
+
+    const liveState = await getLiveState(match.eventId);
+    broadcast('score_diffused', {
+      matchId: id,
+      diffusedScore: diffused,
+      liveState,
+    });
+
+    res.json({ success: true, diffusedScore: diffused });
+  } catch (error: any) {
+    log.error('Erreur diffusion des points', { err: error });
+    if (isMissingSchemaError(error)) {
+      return res.status(503).json({ error: missingSchemaMessage() });
+    }
+    res.status(500).json({ error: 'Erreur lors de la diffusion des points' });
+  }
+});
+
 // Manual adjustment with mandatory justification
 const lastAdjustAction = new Map<string, number>();
 
@@ -1146,12 +1253,27 @@ matchesRouter.post('/:id/broadcast-step', requireAuth, requireJuryOrAdmin, contr
       duration
     );
 
+    // Passer à l'étape FINAL, c'est montrer le score final : le jury qui avance
+    // jusque-là diffuse les totaux par le même geste — sinon l'écran final
+    // resterait masqué alors qu'on lui demande le résultat.
+    let finalDiffusedEventId: number | null | undefined;
+    if (target.stage === BROADCAST_STAGE.FINAL) {
+      const [latest] = await db
+        .select({ id: scoreEvents.id })
+        .from(scoreEvents)
+        .where(eq(scoreEvents.matchId, id))
+        .orderBy(desc(scoreEvents.id))
+        .limit(1);
+      if (latest) finalDiffusedEventId = latest.id;
+    }
+
     const [updated] = await db
       .update(matches)
       .set({
         broadcastStage: target.stage,
         // Plus d'étape ROSTER : pas d'échéance de bascule automatique.
         broadcastRosterUntil: null,
+        ...(finalDiffusedEventId !== undefined ? { diffusedScoreEventId: finalDiffusedEventId } : {}),
         ...(questionChanged
           ? {
               currentQuestionIndex: target.questionIndex,

@@ -198,6 +198,57 @@ export const LiveCompetitionPage: React.FC = () => {
   );
 
   /**
+   * Scores masqués : des points ont été attribués depuis la dernière diffusion
+   * du jury, donc l'écran ne montre aucun total — seulement les noms, pour que
+   * la salle sache que la rencontre continue sans voir ce qu'elle ne doit pas.
+   */
+  const MaskedScorePanel = () => (
+    <div className="rounded-2xl border border-white/12 bg-slate-900/40 p-5 sm:p-7 text-center">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+        {activeMatch?.teamA?.name ?? 'Équipe A'} contre {activeMatch?.teamB?.name ?? 'Équipe B'}
+      </p>
+      <p
+        role="status"
+        className="mx-auto mt-4 max-w-xl text-balance text-xl font-bold text-white sm:text-2xl"
+      >
+        Scores masqués — le jury diffusera les points attribués
+      </p>
+      <p className="mx-auto mt-2 max-w-xl text-pretty text-xs leading-relaxed text-slate-400">
+        La rencontre continue : les totaux s'afficheront dès leur diffusion.
+      </p>
+    </div>
+  );
+
+  /**
+   * Annonce des points diffusés par le jury : la dernière attribution que la
+   * salle a le droit de voir (équipe, points, motif). N'apparaît que sur
+   * diffusion explicite — jamais automatiquement à l'attribution.
+   */
+  const DiffusedScoreBanner = () => {
+    const d = activeMatch?.diffusedScore;
+    if (!d) return null;
+    return (
+      <div
+        role="status"
+        className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 rounded-2xl border border-amber-400/40 bg-amber-400/10 px-5 py-4 text-center"
+      >
+        <span className="text-2xl font-bold tabular-nums text-amber-200 sm:text-3xl">
+          {d.points > 0 ? '+' : ''}{d.points} pts
+        </span>
+        <span className="text-sm font-bold text-white">
+          {d.teamName}
+          {d.questionIndex != null && (
+            <span className="font-semibold text-slate-300">
+              {' '}· question {d.questionIndex + 1}
+            </span>
+          )}
+        </span>
+        <span className="w-full text-xs font-medium text-slate-300">{d.reason}</span>
+      </div>
+    );
+  };
+
+  /**
    * Colonne d'effectif pour une equipe.
    *
    * Seuls prenom et nom sont affiches — c'est tout ce que le serveur envoie
@@ -666,7 +717,12 @@ export const LiveCompetitionPage: React.FC = () => {
           <section id="screen-match-live" className="space-y-5">
             {activeMatch.status === 'PAUSED' && PausedBanner}
 
-            <div className="grid grid-cols-1 items-center gap-5 md:grid-cols-12">
+            {/* Totaux masqués tant que le jury n'a pas diffusé les points
+                attribués : seule la dernière diffusion est montrable. */}
+            {activeMatch.scoresHidden ? (
+              <MaskedScorePanel />
+            ) : (
+              <div className="grid grid-cols-1 items-center gap-5 md:grid-cols-12">
               <div className="md:col-span-5">
                 <TeamScoreCard
                   team={activeMatch.teamA}
@@ -711,7 +767,14 @@ export const LiveCompetitionPage: React.FC = () => {
                   highlight={answerTurn === 'b'}
                 />
               </div>
-            </div>
+              </div>
+            )}
+
+            {/* Dernière annonce de points diffusée par le jury. Absente tant
+                que rien n'est diffusé — et masquée avec les scores sinon. */}
+            {activeMatch.diffusedScore && !activeMatch.scoresHidden && (
+              <DiffusedScoreBanner />
+            )}
 
             {/* Prise de parole : surbrillance de l'équipe, sans le libellé de ce
                 qu'elle a répondu — le jury statue, l'écran montre qui parle. */}

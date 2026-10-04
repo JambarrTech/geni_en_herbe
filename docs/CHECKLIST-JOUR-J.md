@@ -38,7 +38,10 @@ d'arrêt : si elle échoue, on ne passe pas à la suivante.
 1. Compte jury : connexion OK, table du jury accessible.
 2. Programmer un match test (2 équipes), le lancer : **la 1re question de la
    catégorie placée en premier** s'affiche sur l'écran public.
-3. Attribuer des points, révéler une réponse, clôturer le match.
+3. Attribuer des points : vérifier que l'écran public les **masque**
+   (bandeau « Scores masqués »), puis les **diffuser** (bouton « Diffuser les
+   points » de la table du jury) : totaux + annonce visibles.
+4. Révéler une réponse, clôturer le match.
 4. Vérifier le podium général ET le podium par catégorie (onglet Résultats).
 5. Publier puis masquer les résultats (bouton officiel).
 6. Supprimer ou annuler le match test (ne pas fausser le classement du soir).

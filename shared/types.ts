@@ -204,6 +204,16 @@ export interface MatchItem {
   matchQuestions?: MatchQuestionItem[];
   /** Scénario de diffusion du match — absent sur les matchs non diffusés. */
   broadcast?: MatchBroadcast;
+  /**
+   * Le public voit-il les scores pendant ce match ?
+   *
+   * `false` (défaut pendant le match) = totaux affichés = totaux approuvés
+   * par le jury. `true` = des points ont été attribués depuis la dernière
+   * diffusion : l'écran masque les scores jusqu'à la prochaine diffusion.
+   */
+  scoresHidden?: boolean;
+  /** Dernière annonce de points diffusée — `null` si rien à montrer. */
+  diffusedScore?: DiffusedScore | null;
 }
 
 /**
@@ -270,6 +280,23 @@ export interface CategoryRankings {
   categoryName: string;
   categoryPosition: number;
   standings: CategoryStanding[];
+}
+
+/**
+ * Annonce de points diffusée à l'écran public (voir backend `types.ts`).
+ */
+export interface DiffusedScore {
+  eventId: number;
+  teamId: number;
+  teamName: string;
+  teamCode: string;
+  points: number;
+  type: string;
+  reason: string;
+  questionId: number | null;
+  /** Index 0-based de la question dans la série du match, `null` si hors série. */
+  questionIndex: number | null;
+  createdAt: string;
 }
 
 export interface AuditLogItem {

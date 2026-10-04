@@ -44,6 +44,27 @@ export interface CategoryRankings {
   standings: CategoryStanding[];
 }
 
+/**
+ * Annonce de points diffusée à l'écran public.
+ *
+ * C'est LA SEULE chose que le public voit des points attribués pendant le
+ * match : les totaux affichés sont ceux approuvés par le jury (somme des
+ * événements jusqu'à `eventId` inclus), jamais les totaux en direct.
+ */
+export interface DiffusedScore {
+  eventId: number;
+  teamId: number;
+  teamName: string;
+  teamCode: string;
+  points: number;
+  type: string;
+  reason: string;
+  questionId: number | null;
+  /** Index 0-based de la question dans la série du match, `null` si hors série. */
+  questionIndex: number | null;
+  createdAt: string;
+}
+
 export interface LiveStatePayload {
   event: any | null;
   activeMatch: any | null;
