@@ -479,6 +479,45 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
+  // Points hors-plateforme : questions posées hors banque (oral, duel
+  // improvisé) dont les points doivent rejoindre les totaux AVANT diffusion.
+  // Passe par `POST /:id/adjust-score` (événement ADJUSTMENT tracé en audit,
+  // sans question rattachée) : le marqueur de diffusion les couvre comme les
+  // autres événements, donc le bouton « Diffuser le résultat » du jury les
+  // inclut d'un coup — aucune addition manuelle au moment de diffuser.
+  const [extraMatch, setExtraMatch] = useState<MatchItem | null>(null);
+  const [extraTeamId, setExtraTeamId] = useState<number | ''>('');
+  const [extraPoints, setExtraPoints] = useState<number>(APP_CONFIG.DEFAULT_QUESTION_POINTS);
+  const [extraReason, setExtraReason] = useState<string>('');
+
+  const openExtraPoints = (m: MatchItem) => {
+    setExtraMatch(m);
+    setExtraTeamId('');
+    setExtraPoints(APP_CONFIG.DEFAULT_QUESTION_POINTS);
+    setExtraReason('');
+  };
+  const closeExtraPoints = () => {
+    setExtraMatch(null);
+  };
+
+  const handleExtraPoints = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!extraMatch || extraTeamId === '' || !extraReason.trim()) return;
+    try {
+      await api.post(`/api/matches/${extraMatch.id}/adjust-score`, {
+        teamId: extraTeamId,
+        points: extraPoints,
+        reason: `Hors-plateforme : ${extraReason.trim()}`,
+      });
+      showToast(`Points ajoutés au match n° ${extraMatch.matchNumber}`);
+      closeExtraPoints();
+      void fetchData();
+      void refreshLiveState();
+    } catch (err) {
+      showToast(errorMessage(err, 'Ajout impossible'), 'error');
+    }
+  };
+
   /**
    * Le serveur refuse-t-il déjà cette suppression ?
    *
@@ -1403,6 +1442,21 @@ export const AdminDashboard: React.FC = () => {
                           <Undo2 className="w-3.5 h-3.5" aria-hidden="true" />
                         </button>
                       )}
+                      {/* Points hors-plateforme : visible seulement sur un match
+                          en cours ou en pause, la route refusant le reste.
+                          Les points rejoignent les totaux et la diffusion. */}
+                      {(m.status === 'LIVE' || m.status === 'PAUSED') && (
+                        <button
+                          type="button"
+                          id={`btn-extra-points-${m.id}`}
+                          onClick={() => openExtraPoints(m)}
+                          aria-label={`Ajouter des points hors-plateforme au match n° ${m.matchNumber}`}
+                          title="Points de questions posées hors plateforme : additionnés aux totaux avant diffusion"
+                          className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-emerald-700 hover:bg-emerald-50 hover:border-emerald-200 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-1"
+                        >
+                          <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+                        </button>
+                      )}
                       {/* Réordonnancement selon les priorités : visible seulement
                           sur un match non démarré, le serveur refusant le
                           reste (match en cours, terminé ou déjà scoré). */}
@@ -1700,6 +1754,77 @@ export const AdminDashboard: React.FC = () => {
                   className="px-4 py-1.5 rounded-xl bg-[#0B3B82] text-white text-xs font-bold"
                 >
                   Créer l'équipe
+                </button>
+              </div>
+            </form>
+      </Modal>
+
+      {/* MODAL POINTS HORS-PLATEFORME */}
+      <Modal
+        open={extraMatch !== null}
+        onClose={closeExtraPoints}
+        title={`Points hors-plateforme — Match n° ${extraMatch?.matchNumber ?? ''}`}
+        className="max-w-md"
+      >
+            <form onSubmit={handleExtraPoints} className="space-y-3">
+              <p className="text-[11px] leading-relaxed text-slate-500">
+                Questions posées hors de la banque (oral, improvisation) : les points
+                rejoignent les totaux du match et seront inclus à la prochaine diffusion
+                du résultat, sans addition manuelle.
+              </p>
+              <div>
+                <label htmlFor="extra-team" className="block text-xs font-semibold text-slate-700 mb-1">Équipe *</label>
+                <select
+                  id="extra-team"
+                  required
+                  value={extraTeamId}
+                  onChange={(e) => setExtraTeamId(e.target.value === '' ? '' : Number(e.target.value))}
+                  className="w-full p-2.5 rounded-xl border border-slate-300 text-xs text-slate-800"
+                >
+                  <option value="">Sélectionner l'équipe...</option>
+                  {extraMatch && (
+                    <>
+                      <option value={extraMatch.teamAId}>{extraMatch.teamA?.name || 'Équipe A'}</option>
+                      <option value={extraMatch.teamBId}>{extraMatch.teamB?.name || 'Équipe B'}</option>
+                    </>
+                  )}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="extra-points" className="block text-xs font-semibold text-slate-700 mb-1">Points *</label>
+                <input
+                  id="extra-points"
+                  required
+                  type="number"
+                  value={extraPoints}
+                  onChange={(e) => setExtraPoints(Number(e.target.value) || 0)}
+                  className="w-full p-2.5 rounded-xl border border-slate-300 text-xs text-slate-800"
+                />
+              </div>
+              <div>
+                <label htmlFor="extra-reason" className="block text-xs font-semibold text-slate-700 mb-1">Motif *</label>
+                <input
+                  id="extra-reason"
+                  required
+                  value={extraReason}
+                  onChange={(e) => setExtraReason(e.target.value)}
+                  placeholder="ex : duel oral — 2 bonnes réponses"
+                  className="w-full p-2.5 rounded-xl border border-slate-300 text-xs text-slate-800"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={closeExtraPoints}
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 rounded-xl bg-[#0B3B82] text-white text-xs font-bold"
+                >
+                  Ajouter les points
                 </button>
               </div>
             </form>

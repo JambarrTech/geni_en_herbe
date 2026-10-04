@@ -405,6 +405,91 @@ describe('AdminDashboard — suppression d’un match', () => {
 });
 
 /**
+ * Points hors-plateforme : questions posées hors banque.
+ *
+ * POURQUOI CE TEST EXISTE
+ * -----------------------
+ * Un match ne se joue pas qu'avec la banque : duel oral, improvisation. Sans
+ * ce bouton, ces points n'avaient aucun chemin vers les totaux — le comité
+ * les additionnait de tête au moment de diffuser, et l'audit ne voyait rien.
+ * Ce qui est vérifié : le bouton n'existe que quand la route l'accepte
+ * (LIVE/PAUSED), et le corps envoyé porte le motif préfixé qui distingue ces
+ * points dans le journal.
+ */
+describe('AdminDashboard — points hors-plateforme', () => {
+  const match = (id: number, status: MatchItem['status']) => ({
+    id,
+    eventId: 1,
+    phase: 'Phase qualificative',
+    matchNumber: id,
+    teamAId: 10 + id,
+    teamBId: 20 + id,
+    teamA: { id: 10 + id, name: `Alpha ${id}` },
+    teamB: { id: 20 + id, name: `Bravo ${id}` },
+    status,
+    currentQuestionIndex: 0,
+    scoreA: 0,
+    scoreB: 0,
+    timerSecondsLeft: 0,
+    timerIsRunning: false,
+    timerDuration: 0,
+  });
+
+  async function mountOngletMatches(matches: unknown[]) {
+    stubGet({ ...ROUTES, '/api/matches': matches });
+    render(<AdminDashboard />);
+    await waitFor(() => expect(document.getElementById('btn-publish-overview')).not.toBeNull());
+    fireEvent.click(document.getElementById('tab-matches')!);
+    await waitFor(() => expect(document.getElementById('btn-add-match')).not.toBeNull());
+  }
+
+  function boutonAjouter(texte: string): HTMLElement {
+    const boutons = Array.from(document.querySelectorAll<HTMLElement>('button'));
+    const bouton = boutons.find((b) => b.textContent === texte);
+    if (!bouton) throw new Error(`bouton « ${texte} » introuvable`);
+    return bouton;
+  }
+
+  it('propose l’ajout sur un match en cours ou en pause, pas ailleurs', async () => {
+    await mountOngletMatches([
+      match(1, 'LIVE'),
+      match(2, 'PAUSED'),
+      match(3, 'SCHEDULED'),
+      match(4, 'FINISHED'),
+    ]);
+
+    // Même visibilité que la route : `adjust-score` refuse tout sauf
+    // LIVE/PAUSED. Un bouton sur un match programmé échouerait à chaque clic.
+    expect(document.getElementById('btn-extra-points-1')).not.toBeNull();
+    expect(document.getElementById('btn-extra-points-2')).not.toBeNull();
+    expect(document.getElementById('btn-extra-points-3')).toBeNull();
+    expect(document.getElementById('btn-extra-points-4')).toBeNull();
+  });
+
+  it('envoie l’équipe, les points et le motif préfixé en un seul appel', async () => {
+    const envoyer = vi.spyOn(api, 'post').mockResolvedValue({} as never);
+    await mountOngletMatches([match(1, 'LIVE')]);
+
+    fireEvent.click(document.getElementById('btn-extra-points-1')!);
+    await waitFor(() => expect(document.getElementById('extra-team')).not.toBeNull());
+
+    fireEvent.change(document.getElementById('extra-team')!, { target: { value: '11' } });
+    fireEvent.change(document.getElementById('extra-points')!, { target: { value: '20' } });
+    fireEvent.change(document.getElementById('extra-reason')!, { target: { value: 'duel oral' } });
+    fireEvent.click(boutonAjouter('Ajouter les points'));
+
+    // Le préfixe distingue ces points dans le journal d'audit : sans lui, un
+    // ajustement hors-plateforme serait indiscernable d'une correction.
+    await waitFor(() =>
+      expect(envoyer).toHaveBeenCalledWith('/api/matches/1/adjust-score', {
+        teamId: 11,
+        points: 20,
+        reason: 'Hors-plateforme : duel oral',
+      })
+    );
+  });
+});
+/**
  * Suppression des autres ressources : équipes, questions, membres.
  *
  * POURQUOI UN SEUL BLOC POUR LES TROIS
