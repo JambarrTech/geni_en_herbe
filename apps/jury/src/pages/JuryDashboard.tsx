@@ -1258,7 +1258,7 @@ export const JuryDashboard: React.FC = () => {
                         : broadcastStage === 'ROSTER'
                           ? 'La liste des participants des deux équipes.'
                           : broadcastStage === 'ANSWER_A' || broadcastStage === 'ANSWER_B'
-                            ? `La prise de parole de l'équipe ${broadcastStage === 'ANSWER_A' ? 'A' : 'B'}.`
+                            ? `La prise de parole de l'équipe ${broadcastStage === 'ANSWER_A' ? 'A' : 'B'}. Le verdict la fait avancer seul : bonne réponse → affichée, faux → parole à l'autre puis affichée.`
                             : broadcastStage === 'FINAL'
                               ? matchDetails.scoresHidden === true
                                 ? 'Le score final est en attente de diffusion (bouton « Diffuser le résultat »).'

@@ -31,6 +31,7 @@ import { isMissingSchemaError, missingSchemaMessage } from '../lib/dbErrors.ts';
 import { buildMatchList, parseOptions, winnerTeamIdOf } from '../lib/matchList.ts';
 import {
   BROADCAST_STAGE,
+  autoStageForVerdict,
   firstCursor,
   nextCursor,
   normalizeCursor,
@@ -830,6 +831,17 @@ matchesRouter.post('/:id/score', requireAuth, requireJuryOrAdmin, scoreLimit, as
     // Toutes les validations sont passées : on consume la fenêtre anti-double-clic.
     lastScoreAction.set(actionKey, now);
 
+    // Le verdict fait avancer l'écran public (bonne réponse → réponse
+    // officielle, faux → parole à l'autre équipe puis réponse). Calculé AVANT
+    // la transaction, depuis l'étape lue avec le match : à l'intérieur, la
+    // même transaction écrit le verrou de question ET l'étape, donc l'écran
+    // ne peut jamais montrer une prise de parole pour une question verrouillée.
+    const autoStage = autoStageForVerdict({
+      stage: match.broadcastStage,
+      points: parsedPoints,
+      isCurrentQuestion: parsedQuestionId != null && parsedQuestionId === match.currentQuestionId,
+    });
+
     // Écriture atomique : sans transaction, un incident entre l'insertion de
     // l'événement et la mise à jour de matches.score_a/score_b laisserait le
     // score affiché désynchronisé du journal (piste d'audit) — inacceptable pour
@@ -920,7 +932,7 @@ matchesRouter.post('/:id/score', requireAuth, requireJuryOrAdmin, scoreLimit, as
       // perdre d'événement.
       await tx
         .update(matches)
-        .set({ scoreA, scoreB, updatedAt: new Date() })
+        .set({ scoreA, scoreB, updatedAt: new Date(), ...(autoStage ? { broadcastStage: autoStage } : {}) })
         .where(eq(matches.id, matchId));
 
       return { ev, scoreA, scoreB };

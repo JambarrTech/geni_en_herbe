@@ -205,6 +205,56 @@ export function firstCursor(): BroadcastCursor {
   return { stage: BROADCAST_STAGE.QUESTION, questionIndex: 0 };
 }
 
+/**
+ * Étape de diffusion dictée par le verdict du jury sur la question courante,
+ * ou `null` si la notation ne doit pas toucher l'écran.
+ *
+ * LE VERDICT PILOTE L'ÉCRAN, PAS L'INVERSE
+ * ---------------------------------------
+ * Quand le jury valide une bonne réponse (points > 0), le public doit voir la
+ * réponse officielle : l'écran passe à `REVEAL`. Quand il marque « Faux »
+ * (0 pt ou moins), la parole passe à l'autre équipe si elle ne l'a pas eue
+ * (`ANSWER_A` → `ANSWER_B`, `QUESTION` → `ANSWER_B`), sinon l'écran révèle
+ * aussi (`ANSWER_B` → `REVEAL` : les deux ont échoué, la bonne réponse
+ * s'affiche dans les deux cas).
+ *
+ * La règle suit le signe des points — exactement comme le verrou de question
+ * (`ANSWERED` si > 0, `SKIPPED` sinon) écrit par la route de score : bonus,
+ * réplique et pénalité entraînent le même écran que la validation qu'ils
+ * accompagnent, sans exception par type. Une fois la question verrouillée
+ * (`ANSWERED`), l'écran est donc toujours sur la réponse, jamais sur une
+ * prise de parole close.
+ *
+ * Trois garde-fous, tous voulus :
+ *  - question non courante (correction d'une autre question) → `null` : une
+ *    retouche du passé ne doit pas téléporter l'écran ;
+ *  - étape hors `QUESTION`/`ANSWER_A`/`ANSWER_B` (déjà révélé, final) →
+ *    `null` : on ne recule jamais l'écran sur un verdict tardif ;
+ *  - le signe, pas le type : un ajustement ne passe pas par ici (route
+ *    dédiée, sans mouvement d'écran).
+ */
+export function autoStageForVerdict(input: {
+  /** Étape stockée — texte brut, comme la colonne (cf. `isBroadcastStage`). */
+  stage: unknown;
+  /** Points attribués : le signe EST le verdict. */
+  points: number;
+  /** La question notée est-elle celle que le public regarde ? */
+  isCurrentQuestion: boolean;
+}): BroadcastStage | null {
+  if (!input.isCurrentQuestion) return null;
+  if (
+    input.stage !== BROADCAST_STAGE.QUESTION &&
+    input.stage !== BROADCAST_STAGE.ANSWER_A &&
+    input.stage !== BROADCAST_STAGE.ANSWER_B
+  ) {
+    return null;
+  }
+  if (input.points > 0) return BROADCAST_STAGE.REVEAL;
+  return input.stage === BROADCAST_STAGE.ANSWER_B
+    ? BROADCAST_STAGE.REVEAL
+    : BROADCAST_STAGE.ANSWER_B;
+}
+
 /** Positionne un curseur à l'étape souhaitée pour une série donnée de questions. */
 export function walkTo(stage: BroadcastStage): BroadcastCursor {
   return { stage, questionIndex: 0 };

@@ -60,6 +60,10 @@ d'arrêt : si elle échoue, on ne passe pas à la suivante.
 - **Bonus et réplique figent la question** : n'attribuez un ★ Bonus qu'APRÈS
   la (bonne ou mauvaise) réponse — posé avant, il verrouille la question et
   la bonne réponse devient impossible sans ajustement manuel.
+- **Le verdict fait avancer l'écran seul** : « Valider Bonne Réponse »
+  affiche la réponse officielle ; « Faux (0 pt) » donne la parole à l'autre
+  équipe, puis affiche la réponse si elle échoue aussi. Plus besoin d'appuyer
+  sur « Étape suivante » après chaque notation.
 - En cas de doute sur un score : ne pas supprimer, **annuler** le résultat
   (l'audit est conservé, le rétablissement reste possible).
 
