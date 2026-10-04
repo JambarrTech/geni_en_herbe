@@ -3,6 +3,7 @@ import { db } from '../db/index.ts';
 import { events } from '../db/schema.ts';
 import { desc, eq } from 'drizzle-orm';
 import { calculateCategoryRankings, calculateRankings, getLiveState } from '../server/matchEngine.ts';
+import { isMissingSchemaError, missingSchemaMessage } from '../lib/dbErrors.ts';
 import { validateIds } from '../lib/validate.ts';
 
 export const liveRouter = Router();
@@ -53,6 +54,9 @@ liveRouter.get('/api/rankings/by-category', async (_req, res: Response) => {
     const rankings = await calculateCategoryRankings(eventId);
     res.json(rankings);
   } catch (error: any) {
+    if (isMissingSchemaError(error)) {
+      return res.status(503).json({ error: missingSchemaMessage() });
+    }
     res.status(500).json({ error: 'Impossible de calculer le classement par catégorie' });
   }
 });

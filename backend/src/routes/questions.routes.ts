@@ -7,7 +7,7 @@ import { logAudit } from '../server/matchEngine.ts';
 import { CONFIG, FLOW } from '../config.ts';
 import { adminWriteLimit } from '../middleware/rateLimit.ts';
 import { validateIds } from '../lib/validate.ts';
-import { isForeignKeyViolation, FK_DELETE_MESSAGES } from '../lib/dbErrors.ts';
+import { isForeignKeyViolation, FK_DELETE_MESSAGES, isMissingSchemaError, missingSchemaMessage } from '../lib/dbErrors.ts';
 import { createLogger } from '../lib/logger.ts';
 
 const log = createLogger('api');
@@ -176,6 +176,9 @@ questionsRouter.get('/', requireAuth, requireAdmin, async (req: AuthRequest, res
     });
   } catch (error: any) {
     log.error('Erreur chargement questions', { err: error });
+    if (isMissingSchemaError(error)) {
+      return res.status(503).json({ error: missingSchemaMessage() });
+    }
     res.status(500).json({ error: 'Impossible de charger les questions' });
   }
 });

@@ -4,7 +4,7 @@ import { categories, questions } from '../db/schema.ts';
 import { asc, eq, sql } from 'drizzle-orm';
 import { requireAuth, requireAdmin, requireJuryOrAdmin, type AuthRequest } from '../middleware/auth.ts';
 import { logAudit } from '../server/matchEngine.ts';
-import { isForeignKeyViolation, FK_DELETE_MESSAGES } from '../lib/dbErrors.ts';
+import { isForeignKeyViolation, FK_DELETE_MESSAGES, isMissingSchemaError, missingSchemaMessage } from '../lib/dbErrors.ts';
 import { adminWriteLimit } from '../middleware/rateLimit.ts';
 import { validateIds } from '../lib/validate.ts';
 import { createLogger } from '../lib/logger.ts';
@@ -38,6 +38,9 @@ categoriesRouter.get('/', requireAuth, requireJuryOrAdmin, async (_req: AuthRequ
       .orderBy(asc(categories.position), asc(categories.name));
     res.json(allCats);
   } catch (error: any) {
+    if (isMissingSchemaError(error)) {
+      return res.status(503).json({ error: missingSchemaMessage() });
+    }
     res.status(500).json({ error: 'Impossible de charger les catégories' });
   }
 });
