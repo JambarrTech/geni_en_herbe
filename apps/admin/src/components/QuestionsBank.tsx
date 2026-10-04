@@ -9,6 +9,7 @@ export interface QuestionsBankProps {
   onAddCategory: () => void;
   onAddQuestion: () => void;
   onMoveCategory: (catId: number, dir: -1 | 1) => void;
+  onDeleteCategory: (c: CategoryItem, questionCount: number) => void;
   onEditQuestion: (q: QuestionItem) => void;
   onDeleteQuestion: (q: QuestionItem) => void;
 }
@@ -30,6 +31,7 @@ export const QuestionsBank: React.FC<QuestionsBankProps> = ({
   onAddCategory,
   onAddQuestion,
   onMoveCategory,
+  onDeleteCategory,
   onEditQuestion,
   onDeleteQuestion,
 }) => {
@@ -183,6 +185,11 @@ export const QuestionsBank: React.FC<QuestionsBankProps> = ({
                   >
                     <ChevronDown className="w-3.5 h-3.5" aria-hidden="true" />
                   </button>
+                  <BoutonSuppression
+                    id={`btn-delete-category-${c.id}`}
+                    label={`Supprimer la catégorie ${c.name}`}
+                    onClick={() => onDeleteCategory(c, count)}
+                  />
                 </div>
               </div>
             );

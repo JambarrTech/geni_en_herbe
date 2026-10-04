@@ -611,6 +611,27 @@ export const AdminDashboard: React.FC = () => {
     });
   };
 
+  const demanderSuppressionCategorie = (c: CategoryItem, questionCount: number) => {
+    suppression.demander({
+      ressource: `/api/categories/${c.id}`,
+      titre: `Supprimer la catégorie ${c.name} ?`,
+      message:
+        questionCount > 0
+          ? `Cette catégorie contient ${questionCount} question${questionCount > 1 ? 's' : ''} : le serveur refusera tant qu'elles y sont rattachées. Déplacez ou supprimez d'abord ses questions.`
+          : 'La catégorie sera effacée. Cette suppression est définitive : elle ne peut pas être annulée.',
+      succes: `Catégorie ${c.name} supprimée`,
+      details: (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-[13px]">
+          <div className="font-semibold text-slate-900">{c.name}</div>
+          <div className="mt-1 flex items-center justify-between">
+            <span className="font-semibold text-slate-700">Questions rattachées</span>
+            <span className="tabular-nums text-slate-900">{questionCount}</span>
+          </div>
+        </div>
+      ),
+    });
+  };
+
   const demanderSuppressionParticipant = (p: ParticipantItem) => {
     const nom = `${p.firstName} ${p.lastName}`;
     suppression.demander({
@@ -1454,6 +1475,7 @@ export const AdminDashboard: React.FC = () => {
             onAddCategory={() => setShowAddCategory(true)}
             onAddQuestion={() => setShowAddQuestion(true)}
             onMoveCategory={(catId, dir) => void handleMoveCategory(catId, dir)}
+            onDeleteCategory={(c, count) => demanderSuppressionCategorie(c, count)}
             onEditQuestion={(q) => openQuestionEditor(q)}
             onDeleteQuestion={(q) => demanderSuppressionQuestion(q)}
           />
