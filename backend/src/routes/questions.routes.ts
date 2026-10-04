@@ -1,7 +1,7 @@
 import { Router, type Response } from 'express';
 import { db } from '../db/index.ts';
 import { questions, categories } from '../db/schema.ts';
-import { eq, desc, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, notInArray, sql } from 'drizzle-orm';
 import { requireAuth, requireAdmin, type AuthRequest } from '../middleware/auth.ts';
 import { logAudit } from '../server/matchEngine.ts';
 import { CONFIG, FLOW } from '../config.ts';
@@ -11,6 +11,19 @@ import { isForeignKeyViolation, FK_DELETE_MESSAGES } from '../lib/dbErrors.ts';
 import { createLogger } from '../lib/logger.ts';
 
 const log = createLogger('api');
+
+/**
+ * Prochaine position libre dans une catégorie (fin du groupe).
+ * Regroupé ici pour que création et réorganisation partagent la même règle :
+ * une question neuve ne passe jamais devant celles que l'admin a ordonnées.
+ */
+async function nextQuestionPosition(categoryId: number): Promise<number> {
+  const [{ max }] = await db
+    .select({ max: sql<number | null>`max(${questions.position})` })
+    .from(questions)
+    .where(eq(questions.categoryId, categoryId));
+  return (max ?? 0) + 1;
+}
 
 export const questionsRouter = Router();
 
@@ -126,6 +139,7 @@ questionsRouter.get('/', requireAuth, requireAdmin, async (req: AuthRequest, res
           type: questions.type,
           difficulty: questions.difficulty,
           points: questions.points,
+          position: questions.position,
           timeLimitSeconds: questions.timeLimitSeconds,
           options: questions.options,
           explanation: questions.explanation,
@@ -135,7 +149,10 @@ questionsRouter.get('/', requireAuth, requireAdmin, async (req: AuthRequest, res
         })
         .from(questions)
         .innerJoin(categories, eq(questions.categoryId, categories.id))
-        .orderBy(desc(questions.id))
+        // Même ordre que la banque groupée et la sélection d'un match :
+        // catégorie d'abord (position décidée par l'admin), puis question
+        // dans sa catégorie, puis identifiant (déterministe).
+        .orderBy(asc(categories.position), asc(questions.position), asc(questions.id))
         .limit(limit)
         .offset(offset),
       db
@@ -189,6 +206,10 @@ questionsRouter.post('/', requireAuth, requireAdmin, adminWriteLimit, async (req
         type: req.body.type,
         difficulty: req.body.difficulty,
         points: req.body.points,
+        // Une nouvelle question passe en DERNIER de sa catégorie : elle ne
+        // doit pas voler la première place — donc l'ouverture de la banque
+        // et de l'écran public — par surprise.
+        position: await nextQuestionPosition(parseInt(categoryId, 10)),
         timeLimitSeconds: req.body.timeLimitSeconds,
         options: req.body.options ? JSON.stringify(req.body.options) : null,
         explanation,
@@ -203,14 +224,89 @@ questionsRouter.post('/', requireAuth, requireAdmin, adminWriteLimit, async (req
   }
 });
 
+// Réorganisation des questions D'UNE catégorie : l'admin envoie les
+// identifiants dans l'ordre voulu, la première ouvre le groupe — donc
+// l'écran public quand sa catégorie passe.
+// Déclarée AVANT `/:id` : sans paramètre, `validateIds` ne s'applique pas.
+questionsRouter.post('/reorder', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
+  try {
+    const categoryId = parseInt(req.body?.categoryId, 10);
+    if (!Number.isInteger(categoryId) || categoryId <= 0) {
+      return res.status(400).json({ error: 'Catégorie obligatoire pour réorganiser ses questions' });
+    }
+    const [cat] = await db.select({ id: categories.id }).from(categories).where(eq(categories.id, categoryId));
+    if (!cat) return res.status(404).json({ error: 'Catégorie introuvable' });
+
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'La liste ordonnée des identifiants est obligatoire' });
+    }
+    const ordered = [...new Set(ids.map((id) => parseInt(id, 10)).filter((n) => Number.isInteger(n) && n > 0))];
+    if (ordered.length === 0) {
+      return res.status(400).json({ error: 'Aucun identifiant de question valide' });
+    }
+
+    const existing = await db
+      .select({ id: questions.id, categoryId: questions.categoryId })
+      .from(questions)
+      .where(inArray(questions.id, ordered));
+    const found = new Set(existing.map((q) => q.id));
+    const unknown = ordered.filter((id) => !found.has(id));
+    if (unknown.length > 0) {
+      return res.status(404).json({ error: `Questions introuvables : ${unknown.join(', ')}` });
+    }
+    const foreign = existing.filter((q) => q.categoryId !== categoryId).map((q) => q.id);
+    if (foreign.length > 0) {
+      return res.status(400).json({ error: `Questions d'une autre catégorie : ${foreign.join(', ')}` });
+    }
+
+    await db.transaction(async (tx) => {
+      let position = 1;
+      for (const id of ordered) {
+        await tx.update(questions).set({ position }).where(eq(questions.id, id));
+        position += 1;
+      }
+      // Les questions de la catégorie absentes de la liste gardent l'ordre
+      // relatif et passent après : aucune ne disparaît par accident.
+      const rest = await tx
+        .select({ id: questions.id })
+        .from(questions)
+        .where(and(eq(questions.categoryId, categoryId), notInArray(questions.id, ordered)))
+        .orderBy(asc(questions.id));
+      for (const { id } of rest) {
+        await tx.update(questions).set({ position }).where(eq(questions.id, id));
+        position += 1;
+      }
+    });
+
+    await logAudit(req.user?.uid, req.user?.email, 'REORDER_QUESTIONS', 'category', String(categoryId));
+    const reordered = await db
+      .select({ id: questions.id })
+      .from(questions)
+      .where(eq(questions.categoryId, categoryId))
+      .orderBy(asc(questions.position), asc(questions.id));
+    res.json(reordered);
+  } catch (error: any) {
+    res.status(500).json({ error: 'Erreur de réorganisation des questions' });
+  }
+});
+
 questionsRouter.patch('/:id', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
-    const { categoryId, text, answer, explanation, active } = req.body;
+    const { categoryId, text, answer, explanation, active, position } = req.body;
 
     const validationError = validateQuestionPayload(req.body, true);
     if (validationError) {
       return res.status(400).json(validationError);
+    }
+
+    let parsedPosition: number | undefined;
+    if (position !== undefined) {
+      parsedPosition = parseInt(position, 10);
+      if (!Number.isInteger(parsedPosition) || parsedPosition < 0) {
+        return res.status(400).json({ error: 'Position invalide : un entier positif ou nul est attendu' });
+      }
     }
 
     const [updated] = await db
@@ -222,6 +318,7 @@ questionsRouter.patch('/:id', requireAuth, requireAdmin, adminWriteLimit, async 
         ...(req.body.type !== undefined && { type: req.body.type }),
         ...(req.body.difficulty !== undefined && { difficulty: req.body.difficulty }),
         ...(req.body.points !== undefined && { points: req.body.points }),
+        ...(parsedPosition !== undefined && { position: parsedPosition }),
         ...(req.body.timeLimitSeconds !== undefined && { timeLimitSeconds: req.body.timeLimitSeconds }),
         ...(req.body.options !== undefined && { options: req.body.options ? JSON.stringify(req.body.options) : null }),
         ...(explanation !== undefined && { explanation }),

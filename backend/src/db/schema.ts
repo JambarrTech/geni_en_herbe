@@ -127,6 +127,9 @@ export const questions = pgTable(
     type: text('type').notNull().default('DIRECT'), // 'DIRECT' | 'QCM' | 'TRUE_FALSE' | 'RAPID' | 'BONUS'
     difficulty: text('difficulty').notNull().default('MOYEN'), // 'FACILE' | 'MOYEN' | 'DIFFICILE'
     points: integer('points').notNull().default(10),
+    // Ordre dans la catégorie : 1 = première question du groupe (banque
+    // groupée, sélection d'un match). Modifiable par l'admin.
+    position: integer('position').notNull().default(0),
     timeLimitSeconds: integer('time_limit_seconds').notNull().default(15),
     options: text('options'), // JSON string format for QCM: ["Option A", "Option B", ...]
     explanation: text('explanation'),

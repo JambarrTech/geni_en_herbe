@@ -93,6 +93,8 @@ export interface QuestionItem {
   difficulty: QuestionDifficulty;
   points: number;
   timeLimitSeconds: number;
+  /** Ordre dans la catégorie : 1 = première question du groupe. */
+  position: number;
   options?: string[] | null;
   explanation?: string | null;
   mediaUrl?: string | null;

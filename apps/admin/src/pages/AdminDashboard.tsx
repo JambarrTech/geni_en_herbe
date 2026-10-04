@@ -611,6 +611,34 @@ export const AdminDashboard: React.FC = () => {
     });
   };
 
+  /**
+   * Déplace une question d'un cran DANS sa catégorie.
+   *
+   * Même principe que les catégories : l'ordre complet du groupe est renvoyé
+   * au serveur (`POST /reorder`), qui renumérote de 1 à N. La première
+   * question du groupe est celle qui passe en premier quand sa catégorie
+   * arrive à l'écran.
+   */
+  const handleMoveQuestion = async (questionId: number, dir: -1 | 1) => {
+    const target = questionsList.find((q) => q.id === questionId);
+    if (!target) return;
+    const ordered = questionsList
+      .filter((q) => q.categoryId === target.categoryId)
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0) || a.id - b.id)
+      .map((q) => q.id);
+    const idx = ordered.indexOf(questionId);
+    const swapWith = idx + dir;
+    if (idx < 0 || swapWith < 0 || swapWith >= ordered.length) return;
+    [ordered[idx], ordered[swapWith]] = [ordered[swapWith], ordered[idx]];
+    try {
+      await api.post('/api/questions/reorder', { categoryId: target.categoryId, ids: ordered });
+      showToast('Ordre des questions mis à jour');
+      void fetchData();
+    } catch (err) {
+      showToast(errorMessage(err, 'Erreur réorganisation des questions'), 'error');
+    }
+  };
+
   const demanderSuppressionCategorie = (c: CategoryItem, questionCount: number) => {
     suppression.demander({
       ressource: `/api/categories/${c.id}`,
@@ -1475,6 +1503,7 @@ export const AdminDashboard: React.FC = () => {
             onAddCategory={() => setShowAddCategory(true)}
             onAddQuestion={() => setShowAddQuestion(true)}
             onMoveCategory={(catId, dir) => void handleMoveCategory(catId, dir)}
+            onMoveQuestion={(questionId, dir) => void handleMoveQuestion(questionId, dir)}
             onDeleteCategory={(c, count) => demanderSuppressionCategorie(c, count)}
             onEditQuestion={(q) => openQuestionEditor(q)}
             onDeleteQuestion={(q) => demanderSuppressionQuestion(q)}

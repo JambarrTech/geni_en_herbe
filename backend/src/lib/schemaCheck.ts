@@ -43,6 +43,7 @@ export const REQUIRED_COLUMNS: readonly { table: string; column: string; since: 
   { table: 'matches', column: 'broadcast_stage', since: '0004_broadcast_stage' },
   { table: 'matches', column: 'broadcast_roster_until', since: '0005_broadcast_roster_until' },
   { table: 'matches', column: 'diffused_score_event_id', since: '0009_diffused_score' },
+  { table: 'questions', column: 'position', since: '0010_question_position' },
 ];
 
 /**

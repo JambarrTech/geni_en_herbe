@@ -9,6 +9,7 @@ export interface QuestionsBankProps {
   onAddCategory: () => void;
   onAddQuestion: () => void;
   onMoveCategory: (catId: number, dir: -1 | 1) => void;
+  onMoveQuestion: (questionId: number, dir: -1 | 1) => void;
   onDeleteCategory: (c: CategoryItem, questionCount: number) => void;
   onEditQuestion: (q: QuestionItem) => void;
   onDeleteQuestion: (q: QuestionItem) => void;
@@ -31,6 +32,7 @@ export const QuestionsBank: React.FC<QuestionsBankProps> = ({
   onAddCategory,
   onAddQuestion,
   onMoveCategory,
+  onMoveQuestion,
   onDeleteCategory,
   onEditQuestion,
   onDeleteQuestion,
@@ -65,13 +67,21 @@ export const QuestionsBank: React.FC<QuestionsBankProps> = ({
   );
 
   // Carte d'une question (énoncé + réponse officielle + actions) : un seul
-  // gabarit pour tous les groupes, au lieu d'un par groupe.
-  const renderQuestionCard = (q: QuestionItem) => (
+  // gabarit pour tous les groupes, au lieu d'un par groupe. `index`/`total`
+  // placent la question dans SON groupe : la première ouvre le groupe — donc
+  // l'écran public quand sa catégorie passe.
+  const renderQuestionCard = (q: QuestionItem, index: number, total: number) => (
     <div key={q.id} className="p-5 hover:bg-slate-50/50 transition-colors">
       <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
         <div className="flex items-center gap-2">
           <span className="px-2.5 py-0.5 rounded-md bg-blue-50 text-[#0B3B82] text-xs font-bold">
             {q.categoryName}
+          </span>
+          <span
+            title={`Question ${index + 1} sur ${total} dans cette catégorie`}
+            className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-xs font-bold tabular-nums"
+          >
+            #{index + 1}
           </span>
           <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-xs font-semibold">
             {q.difficulty}
@@ -81,6 +91,28 @@ export const QuestionsBank: React.FC<QuestionsBankProps> = ({
           <span className="text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
             {q.points} points • {q.timeLimitSeconds}s
           </span>
+          <button
+            type="button"
+            id={`btn-question-up-${q.id}`}
+            onClick={() => onMoveQuestion(q.id, -1)}
+            disabled={index === 0}
+            aria-label={`Monter la question ${q.id}`}
+            title="Afficher cette question plus tôt dans sa catégorie"
+            className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-[#0B3B82] hover:bg-blue-50 hover:border-blue-200 transition-colors disabled:opacity-35 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-1"
+          >
+            <ChevronUp className="w-3.5 h-3.5" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            id={`btn-question-down-${q.id}`}
+            onClick={() => onMoveQuestion(q.id, 1)}
+            disabled={index === total - 1}
+            aria-label={`Descendre la question ${q.id}`}
+            title="Afficher cette question plus tard dans sa catégorie"
+            className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-[#0B3B82] hover:bg-blue-50 hover:border-blue-200 transition-colors disabled:opacity-35 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-1"
+          >
+            <ChevronDown className="w-3.5 h-3.5" aria-hidden="true" />
+          </button>
           <button
             type="button"
             id={`btn-edit-question-${q.id}`}
@@ -202,7 +234,11 @@ export const QuestionsBank: React.FC<QuestionsBankProps> = ({
 
       {/* Banque groupée : chaque catégorie avec SES questions, dans l'ordre d'affichage. */}
       {orderedCategories.map((cat, catIdx) => {
-        const qs = questionsByCategory.get(cat.id) ?? [];
+        // Tri défensif : le serveur renvoie déjà cet ordre, mais la banque
+        // ne doit jamais dépendre de l'ordre d'une réponse HTTP.
+        const qs = [...(questionsByCategory.get(cat.id) ?? [])].sort(
+          (a, b) => (a.position ?? 0) - (b.position ?? 0) || a.id - b.id
+        );
         return (
           <div key={cat.id} className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
             <div className="flex items-center justify-between gap-2 px-5 py-3 bg-slate-50 border-b border-slate-200">
@@ -219,7 +255,7 @@ export const QuestionsBank: React.FC<QuestionsBankProps> = ({
               </span>
             </div>
             <div className="divide-y divide-slate-100">
-              {qs.map((q) => renderQuestionCard(q))}
+              {qs.map((q, idx) => renderQuestionCard(q, idx, qs.length))}
               {qs.length === 0 && (
                 <div className="p-5 text-xs text-slate-400">
                   Aucune question dans cette catégorie.
@@ -235,7 +271,7 @@ export const QuestionsBank: React.FC<QuestionsBankProps> = ({
             Questions sans catégorie connue ({orphanQuestions.length})
           </div>
           <div className="divide-y divide-slate-100">
-            {orphanQuestions.map((q) => renderQuestionCard(q))}
+            {orphanQuestions.map((q, idx) => renderQuestionCard(q, idx, orphanQuestions.length))}
           </div>
         </div>
       )}
