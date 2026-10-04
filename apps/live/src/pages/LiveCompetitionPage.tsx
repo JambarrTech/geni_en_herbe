@@ -7,8 +7,6 @@ import confetti from 'canvas-confetti';
 import {
   Trophy,
   Sparkles,
-  ChevronUp,
-  ChevronDown,
   Maximize,
   Timer,
   Tv,
@@ -43,7 +41,6 @@ function formatAge(ms: number): string {
  */
 export const LiveCompetitionPage: React.FC = () => {
   const { liveState, isConnected, lastUpdateAt } = useLive();
-  const [showRankings, setShowRankings] = useState(true);
 
   // L'horloge du pied de page doit avancer meme sans nouveau message WebSocket,
   // sinon l'age affiche resterait fige.
@@ -349,7 +346,7 @@ export const LiveCompetitionPage: React.FC = () => {
       <span className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-300/90">
         À la parole
       </span>
-      <span className="text-balance text-3xl font-bold text-amber-100 sm:text-4xl lg:text-5xl">
+      <span className="text-balance text-4xl font-bold text-amber-100 sm:text-5xl lg:text-6xl">
         {team?.name || (accent === 'a' ? 'Équipe A' : 'Équipe B')}
       </span>
     </div>
@@ -369,7 +366,7 @@ export const LiveCompetitionPage: React.FC = () => {
         <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
         <span>Bonne réponse</span>
       </div>
-      <p className="mt-3 text-balance text-center text-2xl font-bold text-emerald-50 sm:text-3xl lg:text-4xl">
+      <p className="mt-3 text-balance text-center text-3xl font-bold text-emerald-50 sm:text-4xl lg:text-5xl">
         {answer ?? '—'}
       </p>
     </div>
@@ -670,38 +667,38 @@ export const LiveCompetitionPage: React.FC = () => {
                 suivante ») ; aucun point ne s’affiche pendant le match —
                 ni totaux, ni annonces. Seul le chrono accompagne. */}
             {currentQ ? (
-              <div className="flex min-h-[72vh] flex-col justify-center rounded-2xl border border-white/12 bg-slate-900/50 p-6 sm:p-12">
-                <div className="mb-8 flex flex-wrap items-center justify-center gap-2">
+              <div className="flex min-h-[80vh] flex-col justify-center rounded-2xl border border-white/12 bg-slate-900/50 p-8 sm:p-14">
+                <div className="mb-10 flex flex-wrap items-center justify-center gap-3">
                   <Badge
                     tone="primary"
-                    className="border-[#2563EB]/40 bg-[#2563EB]/20 text-blue-100"
+                    className="border-[#2563EB]/40 bg-[#2563EB]/20 px-4 py-1.5 text-sm text-blue-100"
                   >
                     Question {(broadcast?.questionIndex ?? activeMatch.currentQuestionIndex) + 1}
                   </Badge>
                   {currentQ.categoryName && (
-                    <Badge className="border-white/15 bg-white/5 text-slate-200">
+                    <Badge className="border-white/15 bg-white/5 px-4 py-1.5 text-sm text-slate-200">
                       {currentQ.categoryName}
                     </Badge>
                   )}
-                  <Badge tone="accent" className="px-3 py-1">
+                  <Badge tone="accent" className="px-4 py-1.5 text-sm">
                     {currentQ.points} points en jeu
                   </Badge>
                 </div>
 
-                <p className="text-balance text-center text-3xl font-bold leading-snug text-white sm:text-5xl lg:text-6xl">
+                <p className="text-balance text-center text-4xl font-bold leading-snug text-white sm:text-6xl lg:text-7xl">
                   {currentQ.text}
                 </p>
 
                 {currentQ.options && Array.isArray(currentQ.options) && (
-                  <div className="mx-auto mt-8 grid w-full max-w-3xl grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="mx-auto mt-10 grid w-full max-w-4xl grid-cols-1 gap-4 sm:grid-cols-2">
                     {currentQ.options.map((opt, i) => (
                       <div
                         key={i}
-                        className="flex items-center gap-3 rounded-xl border border-white/12 bg-slate-900/40 px-4 py-3 text-base font-medium text-white"
+                        className="flex items-center gap-4 rounded-xl border border-white/12 bg-slate-900/40 px-5 py-4 text-xl font-medium text-white"
                       >
                         <span
                           aria-hidden="true"
-                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#2563EB] text-xs font-bold"
+                          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#2563EB] text-sm font-bold"
                         >
                           {String.fromCharCode(65 + i)}
                         </span>
@@ -736,24 +733,9 @@ export const LiveCompetitionPage: React.FC = () => {
         )}
       </main>
 
-      {/* ---------- Classement ---------- */}
+      {/* ---------- Classement (toujours visible : pas de repli) ---------- */}
       <footer className="relative z-10 border-t border-white/10 pt-3">
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <button
-            type="button"
-            onClick={() => setShowRankings((v) => !v)}
-            aria-expanded={showRankings}
-            aria-controls="classement-tournoi"
-            className="flex items-center gap-1.5 rounded-lg px-1.5 py-1 text-xs font-semibold text-blue-300 transition-colors hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
-          >
-            <span>{showRankings ? 'Masquer' : 'Afficher'} le classement du tournoi</span>
-            {showRankings ? (
-              <ChevronDown className="h-4 w-4" aria-hidden="true" />
-            ) : (
-              <ChevronUp className="h-4 w-4" aria-hidden="true" />
-            )}
-          </button>
-
+        <div className="mb-2 flex flex-wrap items-center justify-end gap-2">
           <div className="flex items-center gap-3 text-xs text-slate-500">
             {lastUpdateAt != null && (
               <span className="tabular-nums">
@@ -766,12 +748,11 @@ export const LiveCompetitionPage: React.FC = () => {
           </div>
         </div>
 
-        {showRankings &&
-          (rankings.length > 0 ? (
-            <div
-              id="classement-tournoi"
-              className="grid grid-cols-2 gap-2.5 pt-1 sm:grid-cols-3 lg:grid-cols-4"
-            >
+        {rankings.length > 0 ? (
+          <div
+            id="classement-tournoi"
+            className="grid grid-cols-2 gap-2.5 pt-1 sm:grid-cols-3 lg:grid-cols-4"
+          >
               {rankings.map((r) => (
                 <div
                   key={r.teamId}
@@ -805,7 +786,7 @@ export const LiveCompetitionPage: React.FC = () => {
             >
               Le classement s'affichera dès la clôture des premiers matchs.
             </p>
-          ))}
+          )}
       </footer>
     </div>
   );
