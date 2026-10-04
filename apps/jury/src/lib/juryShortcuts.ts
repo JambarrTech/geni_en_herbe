@@ -46,6 +46,7 @@ export const SCORE_REASONS = {
   answer: (points: number): string => `Bonne réponse directe (${points} pts)`,
   bonus: (points: number): string => `Points Bonus (+${points} pts)`,
   penalty: (): string => 'Réponse erronée (0 pt)',
+  replique: (points: number): string => `Réplique du vis-à-vis (+${points} pts)`,
 } as const;
 
 /** Contexte nécessaire pour traduire une touche en attribution. */
@@ -234,4 +235,44 @@ export const BROADCAST_SHORTCUTS = {
  */
 export function resolveBroadcastShortcut(key: string): BroadcastAction | null {
   return BROADCAST_SHORTCUTS[key.toLowerCase() as keyof typeof BROADCAST_SHORTCUTS] ?? null;
+}
+
+/** Ligne de journal minimale pour décider d'une réplique. */
+export interface RepliqueEventRow {
+  id: number;
+  teamId: number;
+  points: number;
+  questionId?: number | null;
+}
+
+/** Droit de réplique ouvert : l'équipe qui a manqué, et celle qui peut répondre. */
+export interface RepliqueOffer {
+  forTeamId: number;
+  failedTeamId: number;
+}
+
+/**
+ * Droit de réplique du vis-à-vis, à partir du journal de score.
+ *
+ * Règle : après une réponse MANQUÉE (zéro point ou moins) sur la question
+ * courante, SEULE l'équipe adverse peut répliquer — une seule fois (si elle
+ * a déjà marqué sur cette question, le droit est consommé). Une bonne réponse
+ * clôt la question : pas de réplique. PURE ET TESTÉE : c'est elle qui décide
+ * quelle équipe le bouton « Réplique » crédite.
+ */
+export function repliqueOfferFor(
+  events: RepliqueEventRow[],
+  currentQuestionId: number | null,
+  teamAId: number,
+  teamBId: number
+): RepliqueOffer | null {
+  if (!currentQuestionId) return null;
+  const onQuestion = events.filter((e) => e.questionId === currentQuestionId);
+  if (onQuestion.length === 0) return null;
+  const last = onQuestion.reduce((a, b) => (a.id > b.id ? a : b));
+  if (last.points > 0) return null;
+  if (last.teamId !== teamAId && last.teamId !== teamBId) return null;
+  const replyTeamId = last.teamId === teamAId ? teamBId : teamAId;
+  if (onQuestion.some((e) => e.teamId === replyTeamId && e.points > 0)) return null;
+  return { forTeamId: replyTeamId, failedTeamId: last.teamId };
 }

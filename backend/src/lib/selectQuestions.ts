@@ -36,9 +36,12 @@ export function sortPoolForMatch(
 // - If explicit ids are provided, they are validated (must exist) and kept in order.
 // - Otherwise the selection is balanced: active questions not already used in a
 //   match of the same event, picked round-robin across categories.
+// - `maxSize` caps the automatic pick (explicit ids are never truncated : when
+//   the committee chooses the series, it gets exactly what it chose).
 export async function selectQuestionsForMatch(
   eventId: number,
-  providedIds?: unknown
+  providedIds?: unknown,
+  maxSize: number = CONFIG.DEFAULT_MATCH_SIZE
 ): Promise<number[]> {
   const requested = Array.isArray(providedIds)
     ? providedIds
@@ -94,9 +97,11 @@ export async function selectQuestionsForMatch(
 
   const picked: number[] = [];
   const seen = new Set<number>();
+  const limit =
+    Number.isInteger(maxSize) && maxSize > 0 ? Math.min(maxSize, 200) : CONFIG.DEFAULT_MATCH_SIZE;
 
   // Round-robin across categories -> balanced coverage
-  while (seen.size < CONFIG.DEFAULT_MATCH_SIZE && byCategory.size > 0) {
+  while (seen.size < limit && byCategory.size > 0) {
     let addedAny = false;
     for (const catId of [...byCategory.keys()]) {
       const available = byCategory.get(catId)!;
@@ -105,7 +110,7 @@ export async function selectQuestionsForMatch(
         seen.add(candidate.id);
         picked.push(candidate.id);
         addedAny = true;
-        if (seen.size >= CONFIG.DEFAULT_MATCH_SIZE) break;
+        if (seen.size >= limit) break;
       } else {
         byCategory.delete(catId);
       }
@@ -113,5 +118,5 @@ export async function selectQuestionsForMatch(
     if (!addedAny) break;
   }
 
-  return picked.slice(0, CONFIG.DEFAULT_MATCH_SIZE);
+  return picked.slice(0, limit);
 }

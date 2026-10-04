@@ -9,6 +9,7 @@ import {
   SCORE_REASONS,
   hasModifier,
   isTypingTarget,
+  repliqueOfferFor,
   resolveBroadcastShortcut,
   resolveNavShortcut,
   resolveScoreShortcut,
@@ -554,6 +555,26 @@ export const JuryDashboard: React.FC = () => {
   // le bouton « Faux (0 pt) » envoyait alors `questionId: undefined` et
   // chaque clic valait 10 points.
   const canScore = Boolean(isRunning && currentQ) && !actionLoading;
+
+  // Droit de réplique du vis-à-vis : après un échec sur la question courante,
+  // SEULE l'équipe adverse peut répondre (+10 pts). Calculé depuis le
+  // journal, pas depuis l'étape de diffusion : la réplique est une décision
+  // de notation (qui peut marquer), pas de mise en scène (qui montre).
+  const repliqueOffer =
+    matchDetails && isRunning
+      ? repliqueOfferFor(
+          matchDetails.scoreEvents ?? [],
+          matchDetails.currentQuestion?.id ?? matchDetails.currentQuestionId ?? null,
+          matchDetails.teamAId,
+          matchDetails.teamBId
+        )
+      : null;
+  const repliqueTeamName =
+    repliqueOffer && matchDetails
+      ? (repliqueOffer.forTeamId === matchDetails.teamAId
+          ? matchDetails.teamA?.name
+          : matchDetails.teamB?.name) ?? 'Équipe adverse'
+      : null;
   const scoreHint = !matchDetails
     ? null
     : !isRunning
@@ -1052,6 +1073,41 @@ export const JuryDashboard: React.FC = () => {
                 </div>
               </div>
             </div>
+
+            {/* Réplique du vis-à-vis : après un échec, seule l'équipe adverse
+                peut répondre (+10). Le bouton n'existe que dans ce cas : hors
+                échec, il n'y a rien à répliquer. */}
+            {repliqueOffer && (
+              <div
+                role="note"
+                className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5"
+              >
+                <p className="text-xs font-semibold text-amber-900">
+                  Réplique possible : {repliqueTeamName} peut répondre
+                  <span className="block font-normal text-amber-800">
+                    L'autre équipe a manqué sa réponse sur cette question.
+                  </span>
+                </p>
+                <button
+                  id="btn-jury-replique"
+                  type="button"
+                  disabled={!canScore}
+                  onClick={() =>
+                    repliqueOffer &&
+                    handleScore(
+                      repliqueOffer.forTeamId,
+                      APP_CONFIG.REPLIQUE_POINTS,
+                      'BONUS',
+                      SCORE_REASONS.replique(APP_CONFIG.REPLIQUE_POINTS)
+                    )
+                  }
+                  title="Faire répliquer l'équipe adverse (+10 pts)"
+                  className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold shadow-xs flex items-center gap-1.5 transition-all disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-1"
+                >
+                  <span>Réplique +{APP_CONFIG.REPLIQUE_POINTS} pts — {repliqueTeamName}</span>
+                </button>
+              </div>
+            )}
 
             {scoreHint && (
               <p

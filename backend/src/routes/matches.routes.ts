@@ -21,7 +21,7 @@ import {
 } from '../server/matchEngine.ts';
 import { publicQuestion } from '../lib/sanitize.ts';
 import { getSetting } from '../lib/settings.ts';
-import { selectQuestionsForMatch } from '../lib/selectQuestions.ts';
+import { selectQuestionsForMatch, sortPoolForMatch } from '../lib/selectQuestions.ts';
 import { scoreLimit, controlLimit, adminWriteLimit } from '../middleware/rateLimit.ts';
 import { CONFIG, FLOW } from '../config.ts';
 import { validateIds } from '../lib/validate.ts';
@@ -214,7 +214,7 @@ matchesRouter.get('/:id', requireAuth, requireJuryOrAdmin, async (req: AuthReque
 
 matchesRouter.post('/', requireAuth, requireAdmin, adminWriteLimit, async (req: AuthRequest, res: Response) => {
   try {
-    const { eventId, phase, matchNumber, teamAId, teamBId, juryId, questionIds } = req.body;
+    const { eventId, phase, matchNumber, teamAId, teamBId, juryId, questionIds, matchSize } = req.body;
     if (!teamAId || !teamBId) {
       return res.status(400).json({ error: 'Les deux équipes sont obligatoires' });
     }
@@ -268,8 +268,16 @@ matchesRouter.post('/', requireAuth, requireAdmin, adminWriteLimit, async (req: 
       })
       .returning();
 
-    // Sélection équilibrée des questions (validée / par catégorie), sans réutilisation
-    const qIds = await selectQuestionsForMatch(targetEventId, questionIds);
+    // Sélection équilibrée des questions (validée / par catégorie), sans réutilisation.
+    // `matchSize` règle la longueur de la série (défaut : 10). Une liste
+    // explicite `questionIds` n'est jamais tronquée : le comité obtient
+    // exactement la série qu'il a composée.
+    const parsedSize = parseInt(matchSize, 10);
+    const qIds = await selectQuestionsForMatch(
+      targetEventId,
+      questionIds,
+      Number.isInteger(parsedSize) && parsedSize > 0 ? Math.min(parsedSize, 200) : CONFIG.DEFAULT_MATCH_SIZE
+    );
 
     if (qIds.length > 0) {
       await db.insert(matchQuestions).values(
@@ -1168,6 +1176,102 @@ matchesRouter.post('/:id/adjust-score', requireAuth, requireJuryOrAdmin, scoreLi
  * l'état que le jury lui a donné avec ses propres commandes : le scénario ne
  * prend pas le chrono des mains du jury au milieu d'une question.
  */
+// Réordonne la série d'un match NON DÉMARRÉ selon les priorités admin
+// (position de catégorie puis de question). Les matchs en cours, terminés ou
+// déjà scorés sont intouchables : réécrire leur série changerait le sens des
+// points attribués. C'est ce qui applique un réordonnancement tardif aux
+// matchs programmés avant — jury et public suivent `orderNumber`.
+matchesRouter.post('/:id/reorder-questions', requireAuth, requireJuryOrAdmin, controlLimit, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const [match] = await db.select().from(matches).where(eq(matches.id, id));
+    if (!match) return res.status(404).json({ error: 'Match non trouvé' });
+
+    if (
+      match.status !== FLOW.MATCH_STATUS.SCHEDULED &&
+      match.status !== FLOW.MATCH_STATUS.READY
+    ) {
+      return res.status(400).json({ error: 'Seule la série d\'un match non démarré peut être réordonnée' });
+    }
+
+    const [scored] = await db
+      .select({ id: scoreEvents.id })
+      .from(scoreEvents)
+      .where(eq(scoreEvents.matchId, id))
+      .limit(1);
+    if (scored) {
+      return res.status(400).json({ error: 'Série figée : des points ont déjà été attribués sur ce match' });
+    }
+
+    const rows = await db
+      .select({
+        mqId: matchQuestions.id,
+        questionId: matchQuestions.questionId,
+        categoryId: questions.categoryId,
+        position: questions.position,
+      })
+      .from(matchQuestions)
+      .innerJoin(questions, eq(matchQuestions.questionId, questions.id))
+      .where(eq(matchQuestions.matchId, id));
+    if (rows.length === 0) {
+      return res.status(400).json({ error: 'Aucune question dans la série de ce match' });
+    }
+
+    const catRows = await db
+      .select({ id: categories.id, position: categories.position })
+      .from(categories);
+    const rank = new Map(catRows.map((c) => [c.id, c.position] as const));
+    const ordered = sortPoolForMatch(
+      rows.map((r) => ({ id: r.questionId, categoryId: r.categoryId, position: r.position })),
+      rank
+    );
+    const mqByQuestion = new Map(rows.map((r) => [r.questionId, r.mqId]));
+
+    await db.transaction(async (tx) => {
+      let order = 1;
+      for (const q of ordered) {
+        const mqId = mqByQuestion.get(q.id);
+        if (mqId === undefined) continue;
+        await tx
+          .update(matchQuestions)
+          .set({
+            orderNumber: order,
+            status: order === 1 ? FLOW.QUESTION_STATUS.ACTIVE : FLOW.QUESTION_STATUS.PENDING,
+          })
+          .where(eq(matchQuestions.id, mqId));
+        order += 1;
+      }
+      await tx
+        .update(matches)
+        .set({
+          currentQuestionIndex: 0,
+          currentQuestionId: ordered[0]?.id ?? null,
+          updatedAt: new Date(),
+        })
+        .where(eq(matches.id, id));
+    });
+
+    await logAudit(
+      req.user?.uid,
+      req.user?.email,
+      'REORDER_MATCH_QUESTIONS',
+      'match',
+      String(id),
+      `Série du match ${id} réordonnée selon les priorités (${ordered.length} questions)`
+    );
+
+    const liveState = await getLiveState(match.eventId);
+    broadcast('questions_reordered', { matchId: id, liveState });
+    res.json({ success: true, order: ordered.map((q) => q.id) });
+  } catch (error: any) {
+    log.error('Erreur réordonnancement de la série', { err: error });
+    if (isMissingSchemaError(error)) {
+      return res.status(503).json({ error: missingSchemaMessage() });
+    }
+    res.status(500).json({ error: 'Erreur lors du réordonnancement de la série' });
+  }
+});
+
 matchesRouter.post('/:id/broadcast-step', requireAuth, requireJuryOrAdmin, controlLimit, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);

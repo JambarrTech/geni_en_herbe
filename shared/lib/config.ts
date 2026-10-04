@@ -4,6 +4,16 @@ export const APP_CONFIG = {
   DEFAULT_TIMER_SECONDS: 15,
   DEFAULT_QUESTION_POINTS: 10,
   BONUS_POINTS: 5,
+  // Taille par défaut d'une série de match (sélection automatique). Miroir
+  // de `CONFIG.DEFAULT_MATCH_SIZE` côté serveur : l'admin peut la relever à
+  // la création pour faire jouer TOUTE la banque.
+  DEFAULT_MATCH_SIZE: 10,
+  // Droit de réplique du vis-à-vis : quand une équipe manque sa réponse sur
+  // la question courante, SEULE l'équipe adverse peut répliquer, pour ces
+  // points (règle collective 20 pts, réplique 10 pts). Distinct du bonus, qui
+  // ne suppose aucun échec préalable. Miroir de `CONFIG` côté serveur : le
+  // serveur ne connaît que des points, c'est l'interface qui porte la règle.
+  REPLIQUE_POINTS: 10,
   TIMER_WARNING_SECONDS: 5,
 
   // Réglage d'ajustement

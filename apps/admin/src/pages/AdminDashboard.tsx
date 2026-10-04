@@ -175,6 +175,9 @@ export const AdminDashboard: React.FC = () => {
   const [newMatchNumber, setNewMatchNumber] = useState(1);
   const [newMatchTeamA, setNewMatchTeamA] = useState<number | ''>('');
   const [newMatchTeamB, setNewMatchTeamB] = useState<number | ''>('');
+  // Longueur de la série (sélection automatique équilibrée). 10 par défaut :
+  // relever pour faire jouer toute la banque dans l'ordre des priorités.
+  const [newMatchSize, setNewMatchSize] = useState<number>(APP_CONFIG.DEFAULT_MATCH_SIZE);
 
   // Confirmations d'actions à conséquence officielle. Auparavant, ces actions
   // demandaient une validation par `window.confirm` : dialogue hors système,
@@ -443,6 +446,7 @@ export const AdminDashboard: React.FC = () => {
         teamAId: newMatchTeamA,
         teamBId: newMatchTeamB,
         eventId: currentEvent.id,
+        matchSize: newMatchSize,
       });
       showToast('Match programmé avec succès');
       setShowAddMatch(false);
@@ -450,6 +454,27 @@ export const AdminDashboard: React.FC = () => {
       void refreshLiveState();
     } catch (err) {
       showToast(errorMessage(err, 'Erreur programmation du match'), 'error');
+    }
+  };
+
+  /**
+   * Réordonne la série d'un match non démarré selon les priorités admin.
+   *
+   * C'est ce qui applique un réordonnancement TARDIF (catégories ou questions
+   * déplacées après la programmation) aux matchs déjà créés : jury et public
+   * suivent `orderNumber`, donc sans cela ils garderaient l'ancien ordre. Le
+   * serveur refuse les matchs démarrés ou déjà scorés — un bouton actif qui
+   * échouerait à chaque clic apprendrait au comité à ne pas s'en servir, d'où
+   * l'affichage conditionnel ci-dessous.
+   */
+  const handleReorderMatchQuestions = async (m: MatchItem) => {
+    try {
+      await api.post(`/api/matches/${m.id}/reorder-questions`);
+      showToast(`Série du match n° ${m.matchNumber} réordonnée selon les priorités`);
+      void fetchData();
+      void refreshLiveState();
+    } catch (err) {
+      showToast(errorMessage(err, 'Réordonnancement impossible'), 'error');
     }
   };
 
@@ -1377,6 +1402,21 @@ export const AdminDashboard: React.FC = () => {
                           <Undo2 className="w-3.5 h-3.5" aria-hidden="true" />
                         </button>
                       )}
+                      {/* Réordonnancement selon les priorités : visible seulement
+                          sur un match non démarré, le serveur refusant le
+                          reste (match en cours, terminé ou déjà scoré). */}
+                      {(m.status === 'SCHEDULED' || m.status === 'READY') && (
+                        <button
+                          type="button"
+                          id={`btn-reorder-match-${m.id}`}
+                          onClick={() => void handleReorderMatchQuestions(m)}
+                          aria-label={`Réordonner la série du match n° ${m.matchNumber} selon les priorités`}
+                          title="Réordonner les questions selon les priorités (catégories puis questions)"
+                          className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-[#0B3B82] hover:bg-blue-50 hover:border-blue-200 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-1"
+                        >
+                          <RotateCw className="w-3.5 h-3.5" aria-hidden="true" />
+                        </button>
+                      )}
                       {/* Seul cas désactivable : l'état du match est visible ici,
                           donc le serveur va refuser (400). Un match ayant un
                           historique de score (409) ne l'est pas — cette
@@ -2018,6 +2058,27 @@ export const AdminDashboard: React.FC = () => {
                     </option>
                   ))}
                 </select>
+              </div>
+              <div>
+                <label
+                  htmlFor="match-size"
+                  className="block text-xs font-semibold text-slate-700 mb-1"
+                >
+                  Nombre de questions *
+                </label>
+                <input
+                  id="match-size"
+                  type="number"
+                  min={1}
+                  max={200}
+                  required
+                  value={newMatchSize}
+                  onChange={(e) => setNewMatchSize(Math.min(200, Math.max(1, Number(e.target.value) || 1)))}
+                  className="w-full p-2.5 rounded-xl border border-slate-300 text-xs text-slate-800 font-bold"
+                />
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Série équilibrée par catégories, dans l'ordre des priorités. Relever pour faire jouer toute la banque.
+                </p>
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <button
